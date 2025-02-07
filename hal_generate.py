@@ -9,6 +9,7 @@ from tqdm import tqdm
 import numpy as np
 import pickle
 # from utils import get_llama_activations_bau, tokenized_tqa, tokenized_tqa_gen, tokenized_tqa_gen_end_q
+from utils import get_hal_prompt, get_qa_prompt
 import llama_iti
 import pickle
 import argparse
@@ -59,8 +60,9 @@ def main():
     parser.add_argument('--dataset_name', type=str, default='triviaqa')
     parser.add_argument('--num_gene', type=int, default=1)
     parser.add_argument('--use_api', type=bool, default=False)
-    parser.add_argument('--sample', type=bool, default=False)
+    parser.add_argument('--most_likely', type=bool, default=False)
     parser.add_argument("--model_dir", type=str, default=None, help='local directory with model data')
+    parser.add_argument("--instruction", type=str, default=None, help='local directory of instruction file.')
     args = parser.parse_args()
 
     MODEL = HF_NAMES[args.model_name] if not args.model_dir else args.model_dir
@@ -156,6 +158,8 @@ def main():
         dataset = get_dataset(llama_iti.LlamaTokenizer.from_pretrained(MODEL, trust_remote_code=True))
     else:
         raise ValueError("Invalid dataset name")
+    f = open(args.instruction, 'r', encoding="utf-8")
+    instruction = f.read()
 
     if not args.use_api:
         
@@ -173,44 +177,43 @@ def main():
         if not os.path.exists(f'./save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/answers'):
             os.mkdir(f'./save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/answers')
 
-        # period_token_id = [tokenizer(_)['input_ids'][-1] for _ in ['\n']]
-        # period_token_id += [tokenizer.eos_token_id]
+        if not os.path.exists(f'./save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/hallucinations'):
+            os.mkdir(f'./save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/hallucinations')
+
 
         for i in range(begin_index, end_index):
             answers = [None] * args.num_gene
+            hallucinations= [None] * args.num_gene
             if args.dataset_name == 'tydiqa':
                 question = dataset[int(used_indices[i])]['question']
-                prompt = "Concisely answer the following question based on the information in the given passage: \n" + \
-                    " Passage: " + dataset[int(used_indices[i])]['context'] + " \n Q: " + question + " \n A:"
-                # prompt = tokenizer(
-                #     "Concisely answer the following question based on the information in the given passage: \n" + \
-                #     " Passage: " + dataset[int(used_indices[i])]['context'] + " \n Q: " + question + " \n A:",
-                #     return_tensors='pt').input_ids.cuda()
+                prompt = get_qa_prompt(dataset[int(used_indices[i])]['context'],question)
+                hallucination_prompt=get_hal_prompt(dataset[int(used_indices[i])]['context'],question,instruction)
             elif args.dataset_name == 'coqa':
-                prompt = dataset[i]['prompt']
-                # prompt = tokenizer(
-                #     dataset[i]['prompt'], return_tensors='pt').input_ids.cuda()
+                prompt = get_qa_prompt("None",dataset[i]['prompt'])
+                hallucination_prompt=get_hal_prompt("None",dataset[i]['prompt'],instruction)
             else:
                 question = dataset[i]['question']
-                prompt = f"Answer the question concisely. Q: {question}" + " A:"
-                # prompt = tokenizer(f"Answer the question concisely. Q: {question}" + " A:", return_tensors='pt').input_ids.cuda()
+                prompt = get_qa_prompt("None",question)
+                hallucination_prompt=get_hal_prompt("None",question,instruction)
 
             for gen_iter in range(args.num_gene):
-                if args.sample:
-                    response = openai.Completion.create(engine=args.model_name,
-                                                        prompt=prompt,
-                                                        max_tokens=50,
-                                                        n=1,
-                                                        stop=None,
-                                                        top_p=1,
-                                                        temperature=0.9,)
+                if args.most_likely:
+                    response = openai.ChatCompletion.create(
+                model=args.model_name,
+                messages=prompt,
+                temperature=1,
+                max_tokens=256,
+                top_p=1
+            )
+                    hallucination_response = openai.ChatCompletion.create(
+                model=args.model_name,
+                messages=hallucination_prompt,
+                temperature=1,
+                max_tokens=256,
+                top_p=1
+            )
                     decoded=response.choices[0].text
-                    # generated = model.generate(prompt,
-                    #                             num_beams=5,
-                    #                             num_return_sequences=1,
-                    #                             do_sample=False,
-                    #                             max_new_tokens=64,
-                    #                            )
+                    hallucination_decoded=hallucination_response.choices[0].text
                 else:
                     response = openai.Completion.create(engine=args.model_name,
                                                         prompt=prompt,

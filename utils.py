@@ -897,3 +897,34 @@ def get_com_directions(num_layers, num_heads, train_set_idxs, val_set_idxs, sepa
     com_directions = np.array(com_directions)
 
     return com_directions
+
+def get_hal_prompt(knowledge, question, instruction):
+    if isinstance(instruction, str):
+        message = [
+            {"role": "user", "content": instruction +
+                                        "\n\n#Knowledge#: " + knowledge +
+                                        "\n#Question#: " + question +
+                                        # "\n#Right Answer#: " + answer +
+                                        "\n#Hallucinated Answer#: "}
+        ]
+    elif isinstance(instruction, list):
+        mes = [{"role": "user",
+                "content": "You are now a mature hallucination generator. Please generate hallucinated answer for the following question. You can use any method you have learned that is suitable for the given question." +
+                           "\n\n#Knowledge#: " + knowledge +
+                           "\n#Question#: " + question +
+                        #    "\n#Right Answer#: " + answer +
+                           "\n#Hallucinated Answer#: "}]
+        message = instruction + mes
+    else:
+        raise TypeError("The instruction must be str or list!")
+    return message
+    
+def get_qa_prompt(knowledge, question):
+    return [
+        {"role": "user", "content":  "Answer the question concisely." +
+                                        "\n\n#Knowledge#: " + knowledge +
+                                        "\n#Question#: " + question +
+                                        # "\n#Right Answer#: " + answer +
+                                        "\n#Answer#: "}
+    ]
+    
