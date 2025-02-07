@@ -18,8 +18,14 @@ from baukit import Trace, TraceDict
 from metric_utils import get_measures, print_measures
 import re
 from torch.autograd import Variable
+from openai import OpenAI
+import openai
 
-
+API={
+    'gpt-3.5-turbo':{'base_url':"https://api.agicto.cn/v1",'key':''},
+    'deepseek-chat':{'base_url':"https://api.agicto.cn/v1",'key':''},
+    'qwen-turbo':{'base_url':"https://api.agicto.cn/v1",'key':''},
+}
 
 def seed_everything(seed: int):
     import random, os
@@ -53,7 +59,7 @@ def main():
     parser.add_argument('--dataset_name', type=str, default='triviaqa')
     parser.add_argument('--num_gene', type=int, default=1)
     parser.add_argument('--use_api', type=bool, default=False)
-    parser.add_argument('--most_likely', type=bool, default=False)
+    parser.add_argument('--sample', type=bool, default=False)
     parser.add_argument("--model_dir", type=str, default=None, help='local directory with model data')
     args = parser.parse_args()
 
@@ -152,9 +158,7 @@ def main():
         raise ValueError("Invalid dataset name")
 
     if not args.use_api:
-        tokenizer = llama_iti.LlamaTokenizer.from_pretrained(MODEL, trust_remote_code=True)
-        model = llama_iti.LlamaForCausalLM.from_pretrained(MODEL, low_cpu_mem_usage=True, torch_dtype=torch.float16,
-                                                           device_map="auto").cuda()
+        
 
         begin_index = 0
         if args.dataset_name == 'tydiqa':
@@ -162,50 +166,64 @@ def main():
         else:
             end_index = len(dataset)
 
-        if not os.path.exists(f'./save_for_eval/{args.dataset_name}_hal_det/'):
-            os.mkdir(f'./save_for_eval/{args.dataset_name}_hal_det/')
+        if not os.path.exists(f'./save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/'):
+            os.mkdir(f'./save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/')
 
 
-        if not os.path.exists(f'./save_for_eval/{args.dataset_name}_hal_det/answers'):
-            os.mkdir(f'./save_for_eval/{args.dataset_name}_hal_det/answers')
+        if not os.path.exists(f'./save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/answers'):
+            os.mkdir(f'./save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/answers')
 
-        period_token_id = [tokenizer(_)['input_ids'][-1] for _ in ['\n']]
-        period_token_id += [tokenizer.eos_token_id]
+        # period_token_id = [tokenizer(_)['input_ids'][-1] for _ in ['\n']]
+        # period_token_id += [tokenizer.eos_token_id]
 
         for i in range(begin_index, end_index):
             answers = [None] * args.num_gene
             if args.dataset_name == 'tydiqa':
                 question = dataset[int(used_indices[i])]['question']
-                prompt = tokenizer(
-                    "Concisely answer the following question based on the information in the given passage: \n" + \
-                    " Passage: " + dataset[int(used_indices[i])]['context'] + " \n Q: " + question + " \n A:",
-                    return_tensors='pt').input_ids.cuda()
+                prompt = "Concisely answer the following question based on the information in the given passage: \n" + \
+                    " Passage: " + dataset[int(used_indices[i])]['context'] + " \n Q: " + question + " \n A:"
+                # prompt = tokenizer(
+                #     "Concisely answer the following question based on the information in the given passage: \n" + \
+                #     " Passage: " + dataset[int(used_indices[i])]['context'] + " \n Q: " + question + " \n A:",
+                #     return_tensors='pt').input_ids.cuda()
             elif args.dataset_name == 'coqa':
-                prompt = tokenizer(
-                    dataset[i]['prompt'], return_tensors='pt').input_ids.cuda()
+                prompt = dataset[i]['prompt']
+                # prompt = tokenizer(
+                #     dataset[i]['prompt'], return_tensors='pt').input_ids.cuda()
             else:
                 question = dataset[i]['question']
-                prompt = tokenizer(f"Answer the question concisely. Q: {question}" + " A:", return_tensors='pt').input_ids.cuda()
+                prompt = f"Answer the question concisely. Q: {question}" + " A:"
+                # prompt = tokenizer(f"Answer the question concisely. Q: {question}" + " A:", return_tensors='pt').input_ids.cuda()
+
             for gen_iter in range(args.num_gene):
-                if args.most_likely:
-                    generated = model.generate(prompt,
-                                                num_beams=5,
-                                                num_return_sequences=1,
-                                                do_sample=False,
-                                                max_new_tokens=64,
-                                               )
+                if args.sample:
+                    response = openai.Completion.create(engine=args.model_name,
+                                                        prompt=prompt,
+                                                        max_tokens=50,
+                                                        n=1,
+                                                        stop=None,
+                                                        top_p=1,
+                                                        temperature=0.9,)
+                    decoded=response.choices[0].text
+                    # generated = model.generate(prompt,
+                    #                             num_beams=5,
+                    #                             num_return_sequences=1,
+                    #                             do_sample=False,
+                    #                             max_new_tokens=64,
+                    #                            )
                 else:
-                    generated = model.generate(prompt,
-                                                do_sample=True,
-                                                num_return_sequences=1,
-                                                num_beams=1,
-                                                max_new_tokens=64,
-                                                temperature=0.5,
-                                                top_p=1.0)
+                    response = openai.Completion.create(engine=args.model_name,
+                                                        prompt=prompt,
+                                                        max_tokens=50,
+                                                        n=5,
+                                                        best_of=1,
+                                                        stop=None,
+                                                        top_p=0.5,
+                                                        temperature=0.5,)
+                    decoded=response.choices[0].text
 
-
-                decoded = tokenizer.decode(generated[0, prompt.shape[-1]:],
-                                           skip_special_tokens=True)
+                # decoded = tokenizer.decode(generated[0, prompt.shape[-1]:],
+                #                            skip_special_tokens=True)
                 if args.dataset_name == 'tqa' or args.dataset_name == 'triviaqa':
                     # corner case.
                     if 'Answer the question concisely' in decoded:
@@ -232,10 +250,10 @@ def main():
             np.save(f'./save_for_eval/{args.dataset_name}_hal_det/answers/' + info + f'hal_det_{args.model_name}_{args.dataset_name}_answers_index_{i}.npy',
                     answers)
     else:
-        tokenizer = llama_iti.LlamaTokenizer.from_pretrained(MODEL, trust_remote_code=True)
-        model = llama_iti.LlamaForCausalLM.from_pretrained(MODEL, low_cpu_mem_usage=True,
-                                                           torch_dtype=torch.float16,
-                                                           device_map="auto").cuda()
+        client = OpenAI(
+            api_key=API[args.model_name]['key'],  
+            base_url =API[args.model_name]['base_url']
+        )
         # firstly get the embeddings of the generated question and answers.
         embed_generated = []
 
