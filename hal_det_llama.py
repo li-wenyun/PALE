@@ -18,6 +18,9 @@ from baukit import Trace, TraceDict
 from metric_utils import get_measures, print_measures
 import re
 from torch.autograd import Variable
+from scipy.spatial import distance
+from sklearn.linear_model import Perceptron
+from sklearn.ensemble import GradientBoostingRegressor
 
 
 
@@ -52,14 +55,14 @@ def main():
     parser.add_argument('--model_name', type=str, default='llama2_chat_7B')
     parser.add_argument('--dataset_name', type=str, default='triviaqa')
     parser.add_argument('--num_gene', type=int, default=1)
-    parser.add_argument('--gene', type=int, default=0)
-    parser.add_argument('--generate_gt', type=int, default=0)
-    parser.add_argument('--use_rouge', type=int, default=0)
+    # parser.add_argument('--gene', type=int, default=0)
+    # parser.add_argument('--generate_gt', type=int, default=0)
+    parser.add_argument('--use_rouge', type=bool, default= False)
     parser.add_argument('--weighted_svd', type=int, default=0)
     parser.add_argument('--feat_loc_svd', type=int, default=0)
     parser.add_argument('--wild_ratio', type=float, default=0.75)
     parser.add_argument('--thres_gt', type=float, default=0.5)
-    parser.add_argument('--most_likely', type=int, default=0)
+    parser.add_argument('--most_likely', type=bool, default=True)
 
     parser.add_argument("--model_dir", type=str, default=None, help='local directory with model data')
     args = parser.parse_args()
@@ -158,198 +161,40 @@ def main():
     else:
         raise ValueError("Invalid dataset name")
 
-    if args.gene:
-        tokenizer = llama_iti.LlamaTokenizer.from_pretrained(MODEL, trust_remote_code=True)
-        model = llama_iti.LlamaForCausalLM.from_pretrained(MODEL, low_cpu_mem_usage=True, torch_dtype=torch.float16,
-                                                           device_map="auto").cuda()
-
-        begin_index = 0
-        if args.dataset_name == 'tydiqa':
-            end_index = len(used_indices)
-        else:
-            end_index = len(dataset)
-
-        if not os.path.exists(f'./save_for_eval/{args.dataset_name}_hal_det/'):
-            os.mkdir(f'./save_for_eval/{args.dataset_name}_hal_det/')
-
-
-        if not os.path.exists(f'./save_for_eval/{args.dataset_name}_hal_det/answers'):
-            os.mkdir(f'./save_for_eval/{args.dataset_name}_hal_det/answers')
-
-        period_token_id = [tokenizer(_)['input_ids'][-1] for _ in ['\n']]
-        period_token_id += [tokenizer.eos_token_id]
-
-        for i in range(begin_index, end_index):
-            answers = [None] * args.num_gene
-            if args.dataset_name == 'tydiqa':
-                question = dataset[int(used_indices[i])]['question']
-                prompt = tokenizer(
-                    "Concisely answer the following question based on the information in the given passage: \n" + \
-                    " Passage: " + dataset[int(used_indices[i])]['context'] + " \n Q: " + question + " \n A:",
-                    return_tensors='pt').input_ids.cuda()
-            elif args.dataset_name == 'coqa':
-                prompt = tokenizer(
-                    dataset[i]['prompt'], return_tensors='pt').input_ids.cuda()
-            else:
-                question = dataset[i]['question']
-                prompt = tokenizer(f"Answer the question concisely. Q: {question}" + " A:", return_tensors='pt').input_ids.cuda()
-            for gen_iter in range(args.num_gene):
-                if args.most_likely:
-                    generated = model.generate(prompt,
-                                                num_beams=5,
-                                                num_return_sequences=1,
-                                                do_sample=False,
-                                                max_new_tokens=64,
-                                               )
-                else:
-                    generated = model.generate(prompt,
-                                                do_sample=True,
-                                                num_return_sequences=1,
-                                                num_beams=1,
-                                                max_new_tokens=64,
-                                                temperature=0.5,
-                                                top_p=1.0)
-
-
-                decoded = tokenizer.decode(generated[0, prompt.shape[-1]:],
-                                           skip_special_tokens=True)
-                if args.dataset_name == 'tqa' or args.dataset_name == 'triviaqa':
-                    # corner case.
-                    if 'Answer the question concisely' in decoded:
-                        print('#####error')
-                        print(decoded.split('Answer the question concisely')[1])
-                        print('#####error')
-                        decoded = decoded.split('Answer the question concisely')[0]
-                if args.dataset_name == 'coqa':
-                    if 'Q:' in decoded:
-                        print('#####error')
-                        print(decoded.split('Q:')[1])
-                        print('#####error')
-                        decoded = decoded.split('Q:')[0]
-                print(decoded)
-                answers[gen_iter] = decoded
-
-
-            print('sample: ', i)
-            if args.most_likely:
-                info = 'most_likely_'
-            else:
-                info = 'batch_generations_'
-            print("Saving answers")
-            np.save(f'./save_for_eval/{args.dataset_name}_hal_det/answers/' + info + f'hal_det_{args.model_name}_{args.dataset_name}_answers_index_{i}.npy',
-                    answers)
-    elif args.generate_gt:
-        from bleurt_pytorch import BleurtConfig, BleurtForSequenceClassification, BleurtTokenizer
-
-        model = BleurtForSequenceClassification.from_pretrained('lucadiliello/BLEURT-20').cuda()
-        tokenizer = BleurtTokenizer.from_pretrained('lucadiliello/BLEURT-20')
-        model.eval()
-
-        rouge = evaluate.load('rouge')
-        gts = np.zeros(0)
-        if args.dataset_name == 'tydiqa':
-            length = len(used_indices)
-        else:
-            length = len(dataset)
-        for i in range(length):
-            if args.dataset_name == 'tqa':
-                best_answer = dataset[i]['best_answer']
-                correct_answer = dataset[i]['correct_answers']
-                all_answers = [best_answer] + correct_answer
-            elif args.dataset_name == 'triviaqa':
-                all_answers = dataset[i]['answer']['aliases']
-            elif args.dataset_name == 'coqa':
-                all_answers = dataset[i]['answer']
-            elif args.dataset_name == 'tydiqa':
-                all_answers = dataset[int(used_indices[i])]['answers']['text']
-
-            if args.most_likely:
-                answers = np.load(
-                    f'./save_for_eval/{args.dataset_name}_hal_det/answers/most_likely_hal_det_{args.model_name}_{args.dataset_name}_answers_index_{i}.npy')
-            else:
-                answers = np.load(
-                    f'./save_for_eval/{args.dataset_name}_hal_det/answers/batch_generations_hal_det_{args.model_name}_{args.dataset_name}_answers_index_{i}.npy')
-            # get the gt.
-            if args.use_rouge:
-
-                predictions = answers
-                all_results = np.zeros((len(all_answers), len(predictions)))
-                all_results1 = np.zeros((len(all_answers), len(predictions)))
-                all_results2 = np.zeros((len(all_answers), len(predictions)))
-                for anw in range(len(all_answers)):
-                    results = rouge.compute(predictions=predictions,
-                                            references=[all_answers[anw]] * len(predictions),
-                                            use_aggregator=False)
-                    all_results[anw] = results['rougeL']
-                    all_results1[anw] = results['rouge1']
-                    all_results2[anw] = results['rouge2']
-
-                # breakpoint()
-                gts = np.concatenate([gts, np.max(all_results, axis=0)], 0)
-
-                if i % 50 == 0:
-                    print("samples passed: ", i)
-            else:
-
-                predictions = answers
-                all_results = np.zeros((len(all_answers), len(predictions)))
-                with torch.no_grad():
-                    for anw in range(len(all_answers)):
-                        inputs = tokenizer(predictions.tolist(), [all_answers[anw]] * len(predictions),
-                                           padding='longest', return_tensors='pt')
-                        for key in list(inputs.keys()):
-                            inputs[key] = inputs[key].cuda()
-                        res = np.asarray(model(**inputs).logits.flatten().tolist())
-                        all_results[anw] = res
-                gts = np.concatenate([gts, np.max(all_results, axis=0)], 0)
-                if i % 10 == 0:
-                    print("samples passed: ", i)
-        # breakpoint()
-        if args.most_likely:
-            if args.use_rouge:
-                np.save(f'./ml_{args.dataset_name}_rouge_score.npy', gts)
-            else:
-                np.save(f'./ml_{args.dataset_name}_bleurt_score.npy', gts)
-        else:
-            if args.use_rouge:
-                np.save(f'./bg_{args.dataset_name}_rouge_score.npy', gts)
-            else:
-                np.save(f'./bg_{args.dataset_name}_bleurt_score.npy', gts)
-
-    else:
-        tokenizer = llama_iti.LlamaTokenizer.from_pretrained(MODEL, trust_remote_code=True)
-        model = llama_iti.LlamaForCausalLM.from_pretrained(MODEL, low_cpu_mem_usage=True,
+    
+    tokenizer = llama_iti.LlamaTokenizer.from_pretrained(MODEL, trust_remote_code=True)
+    model = llama_iti.LlamaForCausalLM.from_pretrained(MODEL, low_cpu_mem_usage=True,
                                                            torch_dtype=torch.float16,
                                                            device_map="auto").cuda()
         # firstly get the embeddings of the generated question and answers.
-        embed_generated = []
+    embed_generated = []
 
-        if args.dataset_name == 'tydiqa':
+    if args.dataset_name == 'tydiqa':
             length = len(used_indices)
-        else:
+    else:
             length = len(dataset)
-        for i in tqdm(range(length)):
-            if args.dataset_name == 'tydiqa':
+    for i in tqdm(range(length)):
+        if args.dataset_name == 'tydiqa':
                 question = dataset[int(used_indices[i])]['question']
-            else:
+        else:
                 question = dataset[i]['question']
-            answers = np.load(
-                f'save_for_eval/{args.dataset_name}_hal_det/answers/most_likely_hal_det_{args.model_name}_{args.dataset_name}_answers_index_{i}.npy')
+        answers = np.load(
+            f'save_for_eval/{args.dataset_name}_hal_det/answers/most_likely_hal_det_{args.model_name}_{args.dataset_name}_answers_index_{i}.npy')
 
-            for anw in answers:
+        for anw in answers:
 
-                if args.dataset_name == 'tydiqa':
+            if args.dataset_name == 'tydiqa':
                     prompt = tokenizer(
                         "Concisely answer the following question based on the information in the given passage: \n" + \
                         " Passage: " + dataset[int(used_indices[i])]['context'] + " \n Q: " + question + " \n A:",
                         return_tensors='pt').input_ids.cuda()
-                elif args.dataset_name == 'coqa':
+            elif args.dataset_name == 'coqa':
                     prompt = tokenizer(dataset[i]['prompt'] + anw, return_tensors='pt').input_ids.cuda()
-                else:
+            else:
                     prompt = tokenizer(
                         f"Answer the question concisely. Q: {question}" + " A:" + anw,
                         return_tensors='pt').input_ids.cuda()
-                with torch.no_grad():
+            with torch.no_grad():
                     hidden_states = model(prompt, output_hidden_states=True).hidden_states
                     hidden_states = torch.stack(hidden_states, dim=0).squeeze()
                     hidden_states = hidden_states.detach().cpu().numpy()[:, -1, :]
@@ -441,8 +286,9 @@ def main():
 
 
 
-        def svd_embed_score(embed_generated_wild, gt_label, begin_k, k_span, mean=1, svd=1, weight=0):
+        def svd_embed_score(embed_generated_wild,  gt_label,embed_generated_h,embed_generated_t, begin_k, k_span, mean=1, svd=1, weight=0):
             embed_generated = embed_generated_wild
+            # embed_hallucination= embed_generated_h
             best_auroc_over_k = 0
             best_layer_over_k = 0
             best_scores_over_k = None
@@ -450,9 +296,9 @@ def main():
             for k in tqdm(range(begin_k, k_span)):
                 best_auroc = 0
                 best_layer = 0
-                best_scores = None
+                # best_scores = None
                 mean_recorded = None
-                best_projection = None
+                # best_projection = None
                 for layer in range(len(embed_generated_wild[0])):
                     if mean:
                         mean_recorded = embed_generated[:, layer, :].mean(0)
@@ -460,22 +306,27 @@ def main():
                     else:
                         centered = embed_generated[:, layer, :]
 
-                    if not svd:
-                        pca_model = PCA(n_components=k, whiten=False).fit(centered)
-                        projection = pca_model.components_.T
-                        mean_recorded = pca_model.mean_
-                        if weight:
-                            projection = pca_model.singular_values_ * projection
-                    else:
-                        _, sin_value, V_p = torch.linalg.svd(torch.from_numpy(centered).cuda())
-                        projection = V_p[:k, :].T.cpu().data.numpy()
-                        if weight:
-                            projection = sin_value[:k] * projection
+                    mean_h=embed_generated_h[:, layer, :].mean(0)
+                    centered_h=embed_generated_h[:, layer, :]-mean_h
 
+                    mean_t=embed_generated_t[:, layer, :].mean(0)
+                    centered_t=embed_generated_t[:, layer, :].mean(0)-mean_t
 
-                    scores = np.mean(np.matmul(centered, projection), -1, keepdims=True)
-                    assert scores.shape[1] == 1
-                    scores = np.sqrt(np.sum(np.square(scores), axis=1))
+                    # if not svd:
+                    #     assert "Not implemented!"
+                    # else:
+                    _, sin_value, V_p = torch.linalg.svd(torch.from_numpy(centered).cuda())
+                    C=(1 / centered.shape[0])* V_p.T.cpu().data.numpy() @ np.diag(sin_value.cpu().data.numpy() ** 2)
+                    _, sin_value_h, V_p_h = torch.linalg.svd(torch.from_numpy(centered_h).cuda())
+                    C_h=(1 / centered_h.shape[0])* V_p_h.T.cpu().data.numpy() @ np.diag(sin_value_h.cpu().data.numpy() ** 2)
+                    _, sin_value_t, V_p_t = torch.linalg.svd(torch.from_numpy(centered_t).cuda())
+                    C_t=(1 / centered_t.shape[0])* V_p_t.T.cpu().data.numpy() @ np.diag(sin_value_t.cpu().data.numpy() ** 2)
+                    scores= (centered*np.invert(C)*centered.T) ** 0.5 - ((embed_generated[:, layer, :]-mean_t)*np.invert(C_t)*(embed_generated[:, layer, :]-mean_t).T) ** 0.5
+                    + ((embed_generated[:, layer, :]-mean_h)*np.invert(C_h)*(embed_generated[:, layer, :]-mean_h).T) ** 0.5
+                   
+                    # clf = Perceptron(tol=1e-3, random_state=0)
+                    
+
 
                     # not sure about whether true and false data the direction will point to,
                     # so we test both. similar practices are in the representation engineering paper
@@ -496,12 +347,12 @@ def main():
                         best_auroc = measures[0]
                         best_result = [100 * measures[2], 100 * measures[0]]
                         best_layer = layer
-                        best_scores = sign_layer * scores
-                        best_projection = projection
+                        # best_scores = sign_layer * scores
+                        # best_projection = projection
                         best_mean = mean_recorded
                         best_sign = sign_layer
                 print('k: ', k, 'best result: ', best_result, 'layer: ', best_layer,
-                      'mean: ', mean, 'svd: ', svd)
+                      'best_auroc: ', best_auroc)
 
                 if best_auroc > best_auroc_over_k:
                     best_auroc_over_k = best_auroc
@@ -509,8 +360,8 @@ def main():
                     best_layer_over_k = best_layer
                     best_k = k
                     best_sign_over_k = best_sign
-                    best_scores_over_k = best_scores
-                    best_projection_over_k = best_projection
+                    # best_scores_over_k = best_scores
+                    # best_projection_over_k = best_projection
                     best_mean_over_k = best_mean
 
 
@@ -521,7 +372,8 @@ def main():
                     'best_scores':best_scores_over_k,
                     'best_mean': best_mean_over_k,
                     'best_sign':best_sign_over_k,
-                    'best_projection':best_projection_over_k}
+                    # 'best_projection':best_projection_over_k
+                    }
 
 
         from sklearn.decomposition import PCA
@@ -570,7 +422,7 @@ def main():
         #                                    1, 11, mean=0, svd=0, weight=args.weighted_svd)
         # get the best hyper-parameters on validation set
         returned_results = svd_embed_score(embed_generated_eval, gt_label_val,
-                                           1, 11, mean=0, svd=0, weight=args.weighted_svd)
+                                           1, 11, mean=1, svd=1, wei1ght=args.weighted_svd)
 
         pca_model = PCA(n_components=returned_results['k'], whiten=False).fit(embed_generated_wild[:,returned_results['best_layer'],:])
         projection = pca_model.components_.T

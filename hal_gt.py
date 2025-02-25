@@ -8,7 +8,6 @@ import datasets
 from tqdm import tqdm
 import numpy as np
 import pickle
-# from utils import get_llama_activations_bau, tokenized_tqa, tokenized_tqa_gen, tokenized_tqa_gen_end_q
 import llama_iti
 import pickle
 import argparse
@@ -57,6 +56,8 @@ def main():
     parser.add_argument('--most_likely', type=bool, default=False)
     parser.add_argument("--model_dir", type=str, default=None, help='local directory with model data')
     parser.add_argument("--instruction", type=str, default=None, help='local directory of instruction file.')
+    parser.add_argument('--use_rouge', type=bool, default=True)
+    parser.add_argument('--thres_gt', type=float, default=0.5)
 
     # parser.add_argument('--model_name', type=str, default='llama2_chat_7B')
     # parser.add_argument('--dataset_name', type=str, default='triviaqa')
@@ -70,7 +71,7 @@ def main():
     # parser.add_argument('--thres_gt', type=float, default=0.5)
     # parser.add_argument('--most_likely', type=int, default=0)
 
-    parser.add_argument("--model_dir", type=str, default=None, help='local directory with model data')
+    # parser.add_argument("--model_dir", type=str, default=None, help='local directory with model data')
     args = parser.parse_args()
 
     MODEL = HF_NAMES[args.model_name] if not args.model_dir else args.model_dir

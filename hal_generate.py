@@ -24,8 +24,8 @@ import openai
 
 API={
     'gpt-3.5-turbo':{'base_url':"https://api.agicto.cn/v1",'key':''},
-    'deepseek-chat':{'base_url':"https://api.agicto.cn/v1",'key':''},
-    'qwen-turbo':{'base_url':"https://api.agicto.cn/v1",'key':''},
+    'deepseek-chat':{'base_url':"https://api.deepseek.com/v1",'key':'sk-5f06261529bb44df86d9b2fdbae1a6b5'},
+    'qwen-plus':{'base_url':"https://dashscope.aliyuncs.com/compatible-mode/v1",'key':'sk-5be20597fa574155a9e56d7df1acfc7f'},
 }
 
 def seed_everything(seed: int):
@@ -56,16 +56,26 @@ def main():
 
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model_name', type=str, default='llama2_chat_7B')
+    parser.add_argument('--model_name', type=str, default='qwen-plus')
     parser.add_argument('--dataset_name', type=str, default='triviaqa')
     parser.add_argument('--num_gene', type=int, default=1)
-    parser.add_argument('--use_api', type=bool, default=False)
+    parser.add_argument('--use_api', type=bool, default=True)
     parser.add_argument('--most_likely', type=bool, default=False)
     parser.add_argument("--model_dir", type=str, default=None, help='local directory with model data')
-    parser.add_argument("--instruction", type=str, default=None, help='local directory of instruction file.')
+    parser.add_argument("--instruction", type=str, default='/home/liwenyun/code/haloscope/generation/qa/qa_one-turn_instruction.txt', help='local directory of instruction file.')
     args = parser.parse_args()
 
-    MODEL = HF_NAMES[args.model_name] if not args.model_dir else args.model_dir
+    
+    if args.use_api:
+        # openai.api_base=API[args.model_name]['base_url']
+        # openai.api_key=API[args.model_name]['key']
+        client = OpenAI(
+            api_key = API[args.model_name]['key'],
+            base_url = API[args.model_name]['base_url'],
+        )
+
+    else:
+        MODEL = HF_NAMES[args.model_name] if not args.model_dir else args.model_dir
 
 
 
@@ -168,6 +178,9 @@ def main():
         else:
             end_index = len(dataset)
 
+        if not os.path.exists(f'./save_for_eval/{args.dataset_name}/'):
+            os.mkdir(f'./save_for_eval/{args.dataset_name}/')
+
         if not os.path.exists(f'./save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/'):
             os.mkdir(f'./save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/')
 
@@ -196,41 +209,51 @@ def main():
 
             for gen_iter in range(args.num_gene):
                 if args.most_likely:
-                    response = openai.ChatCompletion.create(
-                model=args.model_name,
-                messages=prompt,
-                temperature=1,
-                max_tokens=256,
-                top_p=1
-            )
-                    hallucination_response = openai.ChatCompletion.create(
-                model=args.model_name,
-                messages=hallucination_prompt,
-                temperature=1,
-                max_tokens=256,
-                top_p=1
-            )
-                    decoded=response.choices[0].text
-                    hallucination_decoded=hallucination_response.choices[0].text
+                    response = client.chat.completions.create(
+                    model = args.model_name,
+                    messages = prompt,
+                    max_tokens=256,
+                    top_p=1,
+                    temperature = 1,
+                    )
+            #         openai.ChatCompletion.create(
+            #     model=args.model_name,
+            #     messages=prompt,
+            #     temperature=1,
+            #     max_tokens=256,
+            #     top_p=1
+            # )
+                    hallucination_response = client.chat.completions.create(
+                    model = args.model_name,
+                    messages = hallucination_prompt,
+                    max_tokens=256,
+                    top_p=1,
+                    temperature = 1,
+                    )
+                    decoded=response.choices[0].message.content
+                    hallucination_decoded=hallucination_response.choices[0].message.content
                 else:
-                    response = openai.Completion.create(model=args.model_name,
-                                                        prompt=prompt,
-                                                        max_tokens=256,
-                                                        n=5,
-                                                        best_of=1,
-                                                        stop=None,
-                                                        top_p=0.5,
-                                                        temperature=0.5,)
-                    hallucination_response = openai.Completion.create(model=args.model_name,
-                                                        prompt=hallucination_prompt,
-                                                        max_tokens=256,
-                                                        n=5,
-                                                        best_of=1,
-                                                        stop=None,
-                                                        top_p=0.5,
-                                                        temperature=0.5,)
-                    decoded=response.choices[0].text
-                    hallucination_decoded=hallucination_response.choices[0].text
+                    response = client.chat.completions.create(
+                    model = args.model_name,
+                    messages = prompt,
+                    max_tokens=256,
+                    n=1,
+                    # best_of=1,
+                    top_p=0.5,
+                    temperature = 0.5,
+                    )
+                    
+                    hallucination_response = client.chat.completions.create(
+                    model = args.model_name,
+                    messages = hallucination_prompt,
+                    max_tokens=256,
+                    n=1,
+                    # best_of=1,
+                    top_p=0.5,
+                    temperature = 0.5,
+                    )
+                    decoded=response.choices[0].message.content
+                    hallucination_decoded=hallucination_response.choices[0].message.content
 
 
                 # decoded = tokenizer.decode(generated[0, prompt.shape[-1]:],
@@ -256,10 +279,10 @@ def main():
             else:
                 info = 'batch_generations_'
             print("Saving answers")
-            np.save(f'./save_for_eval/{args.dataset_name}_hal_det/answers/' + info + f'hal_det_{args.model_name}_{args.dataset_name}_answers_index_{i}.npy',
+            np.save(f'./save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/answers/' + info + f'hal_det_{args.model_name}_{args.dataset_name}_answers_index_{i}.npy',
                     answers)
             print("Saving hallucinations")
-            np.save(f'./save_for_eval/{args.dataset_name}_hal_det/hallucinations/' + info + f'hal_det_{args.model_name}_{args.dataset_name}_hallucinations_index_{i}.npy',
+            np.save(f'./save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/hallucinations/' + info + f'hal_det_{args.model_name}_{args.dataset_name}_hallucinations_index_{i}.npy',
                     hallucinations)
 
     else:
