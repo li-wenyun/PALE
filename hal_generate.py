@@ -10,7 +10,7 @@ from tqdm import tqdm
 import numpy as np
 import pickle
 # from utils import get_llama_activations_bau, tokenized_tqa, tokenized_tqa_gen, tokenized_tqa_gen_end_q
-from utils import get_hal_prompt, get_qa_prompt
+from utils import get_hal_prompt, get_qa_prompt, get_truth_prompt
 import llama_iti
 import pickle
 import argparse
@@ -196,14 +196,23 @@ def main():
         if not os.path.exists(f'./save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/hallucinations'):
             os.mkdir(f'./save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/hallucinations')
 
+        if not os.path.exists(f'./save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/truths'):
+            os.mkdir(f'./save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/truths')
+
 
         for i in range(begin_index, end_index):
             answers = [None] * args.num_gene
             hallucinations= [None] * args.num_gene
+            truths = [None] * args.num_gene
             if args.dataset_name == 'tydiqa':
                 question = dataset[int(used_indices[i])]['question']
                 prompt = get_qa_prompt(dataset[int(used_indices[i])]['context'],question)
                 hallucination_prompt=get_hal_prompt(dataset[int(used_indices[i])]['context'],question,instruction)
+                truth_prompt=get_truth_prompt(dataset[int(used_indices[i])]['context'],question)
+            elif args.dataset_name == 'triviaqa':
+                prompt = get_qa_prompt("None",dataset[i]['prompt'])
+                hallucination_prompt=get_hal_prompt("None",dataset[i]['prompt'],instruction)
+                truth_prompt=get_truth_prompt("None",question)
             elif args.dataset_name == 'coqa':
                 prompt = get_qa_prompt("None",dataset[i]['prompt'])
                 hallucination_prompt=get_hal_prompt("None",dataset[i]['prompt'],instruction)
@@ -217,24 +226,33 @@ def main():
                     response = client.chat.completions.create(
                     model = args.model_name,
                     messages = prompt,
-                    max_tokens=256,
+                    # max_tokens=256,
                     top_p=1,
                     temperature = 1,
                     )
                     hallucination_response = client.chat.completions.create(
                     model = args.model_name,
                     messages = hallucination_prompt,
-                    max_tokens=256,
+                    # max_tokens=256,
                     top_p=1,
                     temperature = 1,
                     )
+                    if args.dataset_name == 'tydiqa' or args.dataset_name == 'tydiqa':
+                        truth_response=client.chat.completions.create(
+                        model = args.model_name,
+                        messages = truth_prompt,
+                    # max_tokens=256,
+                        top_p=1,
+                        temperature=1 
+                    )
+                        truth_decoded=truth_response.choices[0].message.content
                     decoded=response.choices[0].message.content
                     hallucination_decoded=hallucination_response.choices[0].message.content
                 else:
                     response = client.chat.completions.create(
                     model = args.model_name,
                     messages = prompt,
-                    max_tokens=256,
+                    # max_tokens=256,
                     n=1,
                     # best_of=1,
                     top_p=0.5,
@@ -250,6 +268,14 @@ def main():
                     top_p=0.5,
                     temperature = 0.5,
                     )
+                    if args.dataset_name == 'tydiqa' or args.dataset_name == 'tydiqa':
+                        truth_response=client.chat.completions.create(
+                        model = args.model_name,
+                        messages = truth_prompt,
+                        top_p=0.5,
+                    temperature = 0.5, 
+                    )
+                        truth_decoded=truth_response.choices[0].message.content
                     decoded=response.choices[0].message.content
                     hallucination_decoded=hallucination_response.choices[0].message.content
                 time.sleep(20)
@@ -270,7 +296,28 @@ def main():
                         hallucination_decoded = hallucination_decoded.split('Q:')[0]
                 answers[gen_iter] = decoded
                 hallucinations[gen_iter]=hallucination_decoded
+                if args.dataset_name == 'tydiqa' or args.dataset_name == 'tydiqa':
+                    truths[gen_iter]=truth_decoded
 
+            
+            # if args.dataset_name == 'tydiqa':
+            #     pass
+            # elif args.dataset_name == 'triviaqa':
+            #     pass
+            if args.dataset_name == 'coqa':
+                truths[0]=dataset[i]['answer']
+                if args.num_gene >1 and dataset[i]['additional_answers']>= args.num_gene-1:
+                    left_truth=dataset[i]['additional_answers'][:args.num_gene-1]
+                truths=truths+left_truth
+            elif args.dataset_name == 'tqa':
+                truths[0]=dataset[i]['Best Answer']
+                if args.num_gene >1:
+                    correct=dataset[i]['Correct Answers'].split(";")
+                    if len(correct) >= args.num_gene-1:
+                        left_truth=correct[:args.num_gene-1]
+                truths=truths+left_truth
+            else:
+                assert 'Not supported dataset!'
 
             print('sample: ', i)
             if args.most_likely:
@@ -283,6 +330,9 @@ def main():
             print("Saving hallucinations")
             np.save(f'./save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/hallucinations/' + info + f'hal_det_{args.model_name}_{args.dataset_name}_hallucinations_index_{i}.npy',
                     hallucinations)
+            print("Saving truths")
+            np.save(f'./save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/truths/' + info + f'hal_det_{args.model_name}_{args.dataset_name}_truths_index_{i}.npy',
+                    truths)
 
     else:
         tokenizer = llama_iti.LlamaTokenizer.from_pretrained(MODEL, trust_remote_code=True)

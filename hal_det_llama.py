@@ -457,9 +457,11 @@ def main():
             if feat_loc == 3:
                 embed_generated_wild = embed_generated[feat_indices_wild][:,1:,:]
                 embed_generated_eval = embed_generated[feat_indices_eval][:, 1:, :]
+                embed_generated_hal,embed_generated_tru=embed_generated_h[feat_indices_wild][:,1:,:], embed_generated_t[feat_indices_wild][:,1:,:]
             else:
                 embed_generated_wild = embed_generated[feat_indices_wild]
                 embed_generated_eval = embed_generated[feat_indices_eval]
+                embed_generated_hal,embed_generated_tru=embed_generated_h[feat_indices_wild], embed_generated_t[feat_indices_wild]
 
 
 
@@ -468,7 +470,7 @@ def main():
         # returned_results = svd_embed_score(embed_generated_wild, gt_label_wild,
         #                                    1, 11, mean=0, svd=0, weight=args.weighted_svd)
         # get the best hyper-parameters on validation set
-        returned_results = svd_embed_score(embed_generated_eval, gt_label_val, 
+        returned_results = svd_embed_score(embed_generated_eval, gt_label_val, embed_generated_hal,embed_generated_tru,
                                            1, 11, mean=1, svd=1, wei1ght=args.weighted_svd)
 
         pca_model = PCA(n_components=returned_results['k'], whiten=False).fit(embed_generated_wild[:,returned_results['best_layer'],:])
