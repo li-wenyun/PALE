@@ -1,4 +1,5 @@
 import os
+import time
 import torch
 import torch.nn.functional as F
 import evaluate
@@ -26,6 +27,10 @@ API={
     'gpt-3.5-turbo':{'base_url':"https://api.agicto.cn/v1",'key':''},
     'deepseek-chat':{'base_url':"https://api.deepseek.com/v1",'key':'sk-5f06261529bb44df86d9b2fdbae1a6b5'},
     'qwen-plus':{'base_url':"https://dashscope.aliyuncs.com/compatible-mode/v1",'key':'sk-5be20597fa574155a9e56d7df1acfc7f'},
+    'step-1-8k':{'base_url':"https://api.stepfun.com/v1",'key':'2hqEtnMCWe5cugi1mAVWRZat5hydLFG8tEJWPRW5XnxglpWxRBp5W0M0dvPAFXhC3'},
+    'moonshot-v1-8k':{'base_url':"https://api.moonshot.cn/v1",'key':'sk-8zjQm3CMAI7qQUWYLgFxSCCQxCOkVfuSkRcs6kNxUZY2L4aV'},
+    'ERNIE-3.5-8K':{'base_url':"https://api.agicto.cn/v1",'key':'sk-BmLsx7BClpqtmIwxLNB5pH5lJ36WJ7GxiV3nV5PiwF7Iwauf'},
+
 }
 
 def seed_everything(seed: int):
@@ -56,11 +61,11 @@ def main():
 
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model_name', type=str, default='qwen-plus')
+    parser.add_argument('--model_name', type=str, default='step-1-8k')
     parser.add_argument('--dataset_name', type=str, default='triviaqa')
     parser.add_argument('--num_gene', type=int, default=1)
     parser.add_argument('--use_api', type=bool, default=True)
-    parser.add_argument('--most_likely', type=bool, default=False)
+    parser.add_argument('--most_likely', type=bool, default=True)
     parser.add_argument("--model_dir", type=str, default=None, help='local directory with model data')
     parser.add_argument("--instruction", type=str, default='/home/liwenyun/code/haloscope/generation/qa/qa_one-turn_instruction.txt', help='local directory of instruction file.')
     args = parser.parse_args()
@@ -216,13 +221,6 @@ def main():
                     top_p=1,
                     temperature = 1,
                     )
-            #         openai.ChatCompletion.create(
-            #     model=args.model_name,
-            #     messages=prompt,
-            #     temperature=1,
-            #     max_tokens=256,
-            #     top_p=1
-            # )
                     hallucination_response = client.chat.completions.create(
                     model = args.model_name,
                     messages = hallucination_prompt,
@@ -254,6 +252,7 @@ def main():
                     )
                     decoded=response.choices[0].message.content
                     hallucination_decoded=hallucination_response.choices[0].message.content
+                time.sleep(20)
 
 
                 # decoded = tokenizer.decode(generated[0, prompt.shape[-1]:],

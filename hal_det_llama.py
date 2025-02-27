@@ -168,6 +168,8 @@ def main():
                                                            device_map="auto").cuda()
         # firstly get the embeddings of the generated question and answers.
     embed_generated = []
+    embed_generated_h =[]
+    embed_generated_t=[]
 
     if args.dataset_name == 'tydiqa':
             length = len(used_indices)
@@ -180,13 +182,16 @@ def main():
                 question = dataset[i]['question']
         answers = np.load(
             f'save_for_eval/{args.dataset_name}_hal_det/answers/most_likely_hal_det_{args.model_name}_{args.dataset_name}_answers_index_{i}.npy')
-
+        truths= np.load(
+            f'save_for_eval/{args.dataset_name}_hal_det/answers/most_likely_hal_det_{args.model_name}_{args.dataset_name}_answers_index_{i}.npy')
+        hallucinations= np.load(
+            f'save_for_eval/{args.dataset_name}_hal_det/hallucinations/most_likely_hal_det_{args.model_name}_{args.dataset_name}_hallucinations_index_{i}.npy')
         for anw in answers:
 
             if args.dataset_name == 'tydiqa':
                     prompt = tokenizer(
                         "Concisely answer the following question based on the information in the given passage: \n" + \
-                        " Passage: " + dataset[int(used_indices[i])]['context'] + " \n Q: " + question + " \n A:",
+                        " Passage: " + dataset[int(used_indices[i])]['context'] + " \n Q: " + question + " \n A:" + anw,
                         return_tensors='pt').input_ids.cuda()
             elif args.dataset_name == 'coqa':
                     prompt = tokenizer(dataset[i]['prompt'] + anw, return_tensors='pt').input_ids.cuda()
@@ -201,6 +206,48 @@ def main():
                     embed_generated.append(hidden_states)
         embed_generated = np.asarray(np.stack(embed_generated), dtype=np.float32)
         np.save(f'save_for_eval/{args.dataset_name}_hal_det/most_likely_{args.model_name}_gene_embeddings_layer_wise.npy', embed_generated)
+
+        for tru in truths:
+
+            if args.dataset_name == 'tydiqa':
+                    prompt = tokenizer(
+                        "Concisely answer the following question based on the information in the given passage: \n" + \
+                        " Passage: " + dataset[int(used_indices[i])]['context'] + " \n Q: " + question + " \n A:" + tru,
+                        return_tensors='pt').input_ids.cuda()
+            elif args.dataset_name == 'coqa':
+                    prompt = tokenizer(dataset[i]['prompt'] + tru, return_tensors='pt').input_ids.cuda()
+            else:
+                    prompt = tokenizer(
+                        f"Answer the question concisely. Q: {question}" + " A:" + tru,
+                        return_tensors='pt').input_ids.cuda()
+            with torch.no_grad():
+                    hidden_states = model(prompt, output_hidden_states=True).hidden_states
+                    hidden_states = torch.stack(hidden_states, dim=0).squeeze()
+                    hidden_states = hidden_states.detach().cpu().numpy()[:, -1, :]
+                    embed_generated_t.append(hidden_states)
+        embed_generated_t = np.asarray(np.stack(embed_generated_t), dtype=np.float32)
+        np.save(f'save_for_eval/{args.dataset_name}_hal_det/most_likely_{args.model_name}_gene_embeddings_t_layer_wise.npy', embed_generated_t)
+
+        for hal in hallucinations:
+
+            if args.dataset_name == 'tydiqa':
+                    prompt = tokenizer(
+                        "Concisely answer the following question based on the information in the given passage: \n" + \
+                        " Passage: " + dataset[int(used_indices[i])]['context'] + " \n Q: " + question + " \n A:" + hal,
+                        return_tensors='pt').input_ids.cuda()
+            elif args.dataset_name == 'coqa':
+                    prompt = tokenizer(dataset[i]['prompt'] + hal, return_tensors='pt').input_ids.cuda()
+            else:
+                    prompt = tokenizer(
+                        f"Answer the question concisely. Q: {question}" + " A:" + hal,
+                        return_tensors='pt').input_ids.cuda()
+            with torch.no_grad():
+                    hidden_states = model(prompt, output_hidden_states=True).hidden_states
+                    hidden_states = torch.stack(hidden_states, dim=0).squeeze()
+                    hidden_states = hidden_states.detach().cpu().numpy()[:, -1, :]
+                    embed_generated_h.append(hidden_states)
+        embed_generated_h = np.asarray(np.stack(embed_generated_h), dtype=np.float32)
+        np.save(f'save_for_eval/{args.dataset_name}_hal_det/most_likely_{args.model_name}_gene_embeddings_h_layer_wise.npy', embed_generated_h)
 
         HEADS = [f"model.layers.{i}.self_attn.head_out" for i in range(model.config.num_hidden_layers)]
         MLPS = [f"model.layers.{i}.mlp" for i in range(model.config.num_hidden_layers)]
@@ -421,7 +468,7 @@ def main():
         # returned_results = svd_embed_score(embed_generated_wild, gt_label_wild,
         #                                    1, 11, mean=0, svd=0, weight=args.weighted_svd)
         # get the best hyper-parameters on validation set
-        returned_results = svd_embed_score(embed_generated_eval, gt_label_val,
+        returned_results = svd_embed_score(embed_generated_eval, gt_label_val, 
                                            1, 11, mean=1, svd=1, wei1ght=args.weighted_svd)
 
         pca_model = PCA(n_components=returned_results['k'], whiten=False).fit(embed_generated_wild[:,returned_results['best_layer'],:])
