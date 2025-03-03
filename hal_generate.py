@@ -62,7 +62,7 @@ def main():
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--model_name', type=str, default='step-1-8k')
-    parser.add_argument('--dataset_name', type=str, default='triviaqa')
+    parser.add_argument('--dataset_name', type=str, default='tqa')
     parser.add_argument('--num_gene', type=int, default=1)
     parser.add_argument('--use_api', type=bool, default=True)
     parser.add_argument('--most_likely', type=bool, default=True)
@@ -226,14 +226,14 @@ def main():
                     response = client.chat.completions.create(
                     model = args.model_name,
                     messages = prompt,
-                    # max_tokens=256,
+                    max_tokens=256,
                     top_p=1,
                     temperature = 1,
                     )
                     hallucination_response = client.chat.completions.create(
                     model = args.model_name,
                     messages = hallucination_prompt,
-                    # max_tokens=256,
+                    max_tokens=256,
                     top_p=1,
                     temperature = 1,
                     )
@@ -241,7 +241,7 @@ def main():
                         truth_response=client.chat.completions.create(
                         model = args.model_name,
                         messages = truth_prompt,
-                    # max_tokens=256,
+                    max_tokens=256,
                         top_p=1,
                         temperature=1 
                     )
@@ -252,7 +252,7 @@ def main():
                     response = client.chat.completions.create(
                     model = args.model_name,
                     messages = prompt,
-                    # max_tokens=256,
+                    max_tokens=256,
                     n=1,
                     # best_of=1,
                     top_p=0.5,
@@ -300,22 +300,12 @@ def main():
                     truths[gen_iter]=truth_decoded
 
             
-            # if args.dataset_name == 'tydiqa':
-            #     pass
-            # elif args.dataset_name == 'triviaqa':
-            #     pass
             if args.dataset_name == 'coqa':
-                truths[0]=dataset[i]['answer']
-                if args.num_gene >1 and dataset[i]['additional_answers']>= args.num_gene-1:
-                    left_truth=dataset[i]['additional_answers'][:args.num_gene-1]
-                truths=truths+left_truth
+                truths=[dataset[i]['answer']]+dataset[i]['additional_answers']
+                truths=truths[:args.num_gene]
             elif args.dataset_name == 'tqa':
-                truths[0]=dataset[i]['Best Answer']
-                if args.num_gene >1:
-                    correct=dataset[i]['Correct Answers'].split(";")
-                    if len(correct) >= args.num_gene-1:
-                        left_truth=correct[:args.num_gene-1]
-                truths=truths+left_truth
+                truths=[dataset[i]['best_answer']]+dataset[i]['correct_answers']
+                truths=truths[:args.num_gene]
             else:
                 assert 'Not supported dataset!'
 

@@ -52,11 +52,10 @@ def main():
 
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model_name', type=str, default='llama2_chat_7B')
-    parser.add_argument('--dataset_name', type=str, default='triviaqa')
+    parser.add_argument('--model', type=str, default='llama2_chat_7B')
+    parser.add_argument('--model_name', type=str, default='step-1-8k')
+    parser.add_argument('--dataset_name', type=str, default='tqa')
     parser.add_argument('--num_gene', type=int, default=1)
-    # parser.add_argument('--gene', type=int, default=0)
-    # parser.add_argument('--generate_gt', type=int, default=0)
     parser.add_argument('--use_rouge', type=bool, default= False)
     parser.add_argument('--weighted_svd', type=int, default=0)
     parser.add_argument('--feat_loc_svd', type=int, default=0)
@@ -67,7 +66,7 @@ def main():
     parser.add_argument("--model_dir", type=str, default=None, help='local directory with model data')
     args = parser.parse_args()
 
-    MODEL = HF_NAMES[args.model_name] if not args.model_dir else args.model_dir
+    MODEL = HF_NAMES[args.model] if not args.model_dir else args.model_dir
 
 
 
@@ -180,12 +179,16 @@ def main():
                 question = dataset[int(used_indices[i])]['question']
         else:
                 question = dataset[i]['question']
+        if args.most_likely:
+            info = 'most_likely_'
+        else:
+            info = 'batch_generations_'
         answers = np.load(
-            f'save_for_eval/{args.dataset_name}_hal_det/answers/most_likely_hal_det_{args.model_name}_{args.dataset_name}_answers_index_{i}.npy')
+            f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/answers/' + info + f'hal_det_{args.model_name}_{args.dataset_name}_answers_index_{i}.npy')
         truths= np.load(
-            f'save_for_eval/{args.dataset_name}_hal_det/answers/most_likely_hal_det_{args.model_name}_{args.dataset_name}_answers_index_{i}.npy')
+            f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/truths/' + info + f'hal_det_{args.model_name}_{args.dataset_name}_truths_index_{i}.npy')
         hallucinations= np.load(
-            f'save_for_eval/{args.dataset_name}_hal_det/hallucinations/most_likely_hal_det_{args.model_name}_{args.dataset_name}_hallucinations_index_{i}.npy')
+            f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/hallucinations/' + info + f'hal_det_{args.model_name}_{args.dataset_name}_hallucinations_index_{i}.npy')
         for anw in answers:
 
             if args.dataset_name == 'tydiqa':
@@ -205,7 +208,7 @@ def main():
                     hidden_states = hidden_states.detach().cpu().numpy()[:, -1, :]
                     embed_generated.append(hidden_states)
         embed_generated = np.asarray(np.stack(embed_generated), dtype=np.float32)
-        np.save(f'save_for_eval/{args.dataset_name}_hal_det/most_likely_{args.model_name}_gene_embeddings_layer_wise.npy', embed_generated)
+        np.save(f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/' + info + f'{args.model_name}_gene_embeddings_layer_wise.npy', embed_generated)
 
         for tru in truths:
 
@@ -226,7 +229,7 @@ def main():
                     hidden_states = hidden_states.detach().cpu().numpy()[:, -1, :]
                     embed_generated_t.append(hidden_states)
         embed_generated_t = np.asarray(np.stack(embed_generated_t), dtype=np.float32)
-        np.save(f'save_for_eval/{args.dataset_name}_hal_det/most_likely_{args.model_name}_gene_embeddings_t_layer_wise.npy', embed_generated_t)
+        np.save(f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/' + info + f'{args.model_name}_gene_embeddings_t_layer_wise.npy', embed_generated_t)
 
         for hal in hallucinations:
 
@@ -247,7 +250,7 @@ def main():
                     hidden_states = hidden_states.detach().cpu().numpy()[:, -1, :]
                     embed_generated_h.append(hidden_states)
         embed_generated_h = np.asarray(np.stack(embed_generated_h), dtype=np.float32)
-        np.save(f'save_for_eval/{args.dataset_name}_hal_det/most_likely_{args.model_name}_gene_embeddings_h_layer_wise.npy', embed_generated_h)
+        np.save(f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/' + info + f'{args.model_name}_gene_embeddings_h_layer_wise.npy', embed_generated_h)
 
         HEADS = [f"model.layers.{i}.self_attn.head_out" for i in range(model.config.num_hidden_layers)]
         MLPS = [f"model.layers.{i}.mlp" for i in range(model.config.num_hidden_layers)]
@@ -261,7 +264,7 @@ def main():
 
 
             answers = np.load(
-                f'save_for_eval/{args.dataset_name}_hal_det/answers/most_likely_hal_det_{args.model_name}_{args.dataset_name}_answers_index_{i}.npy')
+                f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/answers/' + info + f'hal_det_{args.model_name}_{args.dataset_name}_answers_index_{i}.npy')
             for anw in answers:
                 if args.dataset_name == 'tydiqa':
                     prompt = tokenizer(
@@ -288,18 +291,18 @@ def main():
         embed_generated_loc2 = np.asarray(np.stack(embed_generated_loc2), dtype=np.float32)
         embed_generated_loc1 = np.asarray(np.stack(embed_generated_loc1), dtype=np.float32)
 
-        np.save(f'save_for_eval/{args.dataset_name}_hal_det/most_likely_{args.model_name}_gene_embeddings_head_wise.npy', embed_generated_loc1)
-        np.save(f'save_for_eval/{args.dataset_name}_hal_det/most_likely_{args.model_name}_embeddings_mlp_wise.npy',  embed_generated_loc2)
+        np.save(f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/' + info + f'{args.model_name}_gene_embeddings_head_wise.npy', embed_generated_loc1)
+        np.save(f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/' + info + f'{args.model_name}_embeddings_mlp_wise.npy',  embed_generated_loc2)
 
 
 
         # get the split and label (true or false) of the unlabeled data and the test data.
         if args.use_rouge:
-            gts = np.load(f'./ml_{args.dataset_name}_rouge_score.npy')
-            gts_bg = np.load(f'./bg_{args.dataset_name}_rouge_score.npy')
+            gts = np.load(f'./ml_{args.dataset_name}_{args.model_name}_rouge_score.npy')
+            gts_bg = np.load(f'./bg_{args.dataset_name}_{args.model_name}_rouge_score.npy')
         else:
-            gts = np.load(f'./ml_{args.dataset_name}_bleurt_score.npy')
-            gts_bg = np.load(f'./bg_{args.dataset_name}_bleurt_score.npy')
+            gts = np.load(f'./ml_{args.dataset_name}_{args.model_name}_bleurt_score.npy')
+            gts_bg = np.load(f'./bg_{args.dataset_name}_{args.model_name}_bleurt_score.npy')
         thres = args.thres_gt
         gt_label = np.asarray(gts> thres, dtype=np.int32)
         gt_label_bg = np.asarray(gts_bg > thres, dtype=np.int32)
@@ -430,15 +433,15 @@ def main():
 
         if args.most_likely:
             if feat_loc == 3:
-                embed_generated = np.load(f'save_for_eval/{args.dataset_name}_hal_det/most_likely_{args.model_name}_gene_embeddings_layer_wise.npy',
+                embed_generated = np.load(f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/' + info + f'{args.model_name}_gene_embeddings_layer_wise.npy',
                                   allow_pickle=True)
             elif feat_loc == 2:
                 embed_generated = np.load(
-                    f'save_for_eval/{args.dataset_name}_hal_det/most_likely_{args.model_name}_gene_embeddings_mlp_wise.npy',
+                    f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/' + info + f'{args.model_name}_gene_embeddings_mlp_wise.npy',
                     allow_pickle=True)
             else:
                 embed_generated = np.load(
-                    f'save_for_eval/{args.dataset_name}_hal_det/most_likely_{args.model_name}_gene_embeddings_head_wise.npy',
+                    f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/' + info + f'{args.model_name}_gene_embeddings_head_wise.npy',
                     allow_pickle=True)
             feat_indices_wild = []
             feat_indices_eval = []

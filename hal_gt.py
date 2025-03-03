@@ -49,14 +49,15 @@ def main():
 
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model_name', type=str, default='llama2_chat_7B')
-    parser.add_argument('--dataset_name', type=str, default='triviaqa')
+    parser.add_argument('--model', type=str, default='llama2_chat_7B')
+    parser.add_argument('--model_name', type=str, default='step-1-8k')
+    parser.add_argument('--dataset_name', type=str, default='tqa')
     parser.add_argument('--num_gene', type=int, default=1)
     parser.add_argument('--use_api', type=bool, default=False)
-    parser.add_argument('--most_likely', type=bool, default=False)
+    parser.add_argument('--most_likely', type=bool, default=True)
     parser.add_argument("--model_dir", type=str, default=None, help='local directory with model data')
     parser.add_argument("--instruction", type=str, default=None, help='local directory of instruction file.')
-    parser.add_argument('--use_rouge', type=bool, default=True)
+    parser.add_argument('--use_rouge', type=bool, default=False)
     parser.add_argument('--thres_gt', type=float, default=0.5)
 
     # parser.add_argument('--model_name', type=str, default='llama2_chat_7B')
@@ -74,7 +75,7 @@ def main():
     # parser.add_argument("--model_dir", type=str, default=None, help='local directory with model data')
     args = parser.parse_args()
 
-    MODEL = HF_NAMES[args.model_name] if not args.model_dir else args.model_dir
+    MODEL = HF_NAMES[args.model] if not args.model_dir else args.model_dir
 
 
 
@@ -198,10 +199,10 @@ def main():
 
         if args.most_likely:
             answers = np.load(
-                f'./save_for_eval/{args.dataset_name}_hal_det/answers/most_likely_hal_det_{args.model_name}_{args.dataset_name}_answers_index_{i}.npy')
+                f'./save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/answers/most_likely_hal_det_{args.model_name}_{args.dataset_name}_answers_index_{i}.npy')
         else:
             answers = np.load(
-                f'./save_for_eval/{args.dataset_name}_hal_det/answers/batch_generations_hal_det_{args.model_name}_{args.dataset_name}_answers_index_{i}.npy')
+                f'./save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/answers/batch_generations_hal_det_{args.model_name}_{args.dataset_name}_answers_index_{i}.npy')
             # get the gt.
         if args.use_rouge:
 
@@ -240,14 +241,14 @@ def main():
         # breakpoint()
     if args.most_likely:
         if args.use_rouge:
-            np.save(f'./ml_{args.dataset_name}_rouge_score.npy', gts)
+            np.save(f'./ml_{args.dataset_name}_{args.model_name}_rouge_score.npy', gts)
         else:
-            np.save(f'./ml_{args.dataset_name}_bleurt_score.npy', gts)
+            np.save(f'./ml_{args.dataset_name}_{args.model_name}_bleurt_score.npy', gts)
     else:
         if args.use_rouge:
-            np.save(f'./bg_{args.dataset_name}_rouge_score.npy', gts)
+            np.save(f'./bg_{args.dataset_name}_{args.model_name}_rouge_score.npy', gts)
         else:
-            np.save(f'./bg_{args.dataset_name}_bleurt_score.npy', gts)
+            np.save(f'./bg_{args.dataset_name}_{args.model_name}_bleurt_score.npy', gts)
 
     
 
