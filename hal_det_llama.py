@@ -165,10 +165,16 @@ def main():
     model = llama_iti.LlamaForCausalLM.from_pretrained(MODEL, low_cpu_mem_usage=True,
                                                            torch_dtype=torch.float16,
                                                            device_map="auto").cuda()
+    HEADS = [f"model.layers.{i}.self_attn.head_out" for i in range(model.config.num_hidden_layers)]
+    MLPS = [f"model.layers.{i}.mlp" for i in range(model.config.num_hidden_layers)]
         # firstly get the embeddings of the generated question and answers.
     embed_generated = []
     embed_generated_h =[]
     embed_generated_t=[]
+    embed_generated_t_loc2 = []
+    embed_generated_t_loc1 = []
+    embed_generated_h_loc2 = []
+    embed_generated_h_loc1 = []
 
     if args.dataset_name == 'tydiqa':
             length = len(used_indices)
@@ -224,12 +230,19 @@ def main():
                         f"Answer the question concisely. Q: {question}" + " A:" + tru,
                         return_tensors='pt').input_ids.cuda()
             with torch.no_grad():
-                    hidden_states = model(prompt, output_hidden_states=True).hidden_states
-                    hidden_states = torch.stack(hidden_states, dim=0).squeeze()
-                    hidden_states = hidden_states.detach().cpu().numpy()[:, -1, :]
-                    embed_generated_t.append(hidden_states)
-        embed_generated_t = np.asarray(np.stack(embed_generated_t), dtype=np.float32)
-        np.save(f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/' + info + f'{args.model_name}_gene_embeddings_t_layer_wise.npy', embed_generated_t)
+                with TraceDict(model, HEADS + MLPS) as ret:
+                    output = model(prompt, output_hidden_states=True)
+                head_wise_hidden_states = [ret[head].output.squeeze().detach().cpu() for head in HEADS]
+                head_wise_hidden_states = torch.stack(head_wise_hidden_states, dim=0).squeeze().numpy()
+                mlp_wise_hidden_states = [ret[mlp].output.squeeze().detach().cpu() for mlp in MLPS]
+                mlp_wise_hidden_states = torch.stack(mlp_wise_hidden_states, dim=0).squeeze().numpy()
+
+                embed_generated_t_loc2.append(mlp_wise_hidden_states[:, -1, :])
+                embed_generated_t_loc1.append(head_wise_hidden_states[:, -1, :])
+        embed_generated_t_loc2 = np.asarray(np.stack(embed_generated_t_loc2), dtype=np.float32)
+        embed_generated_t_loc1 = np.asarray(np.stack(embed_generated_t_loc1), dtype=np.float32)
+        np.save(f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/' + info + f'{args.model_name}_gene_embeddings_t_head_wise.npy', embed_generated_t_loc2)
+        np.save(f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/' + info + f'{args.model_name}_gene_embeddings_t_mlp_wise.npy', embed_generated_t_loc1)
 
         for hal in hallucinations:
 
@@ -245,15 +258,21 @@ def main():
                         f"Answer the question concisely. Q: {question}" + " A:" + hal,
                         return_tensors='pt').input_ids.cuda()
             with torch.no_grad():
-                    hidden_states = model(prompt, output_hidden_states=True).hidden_states
-                    hidden_states = torch.stack(hidden_states, dim=0).squeeze()
-                    hidden_states = hidden_states.detach().cpu().numpy()[:, -1, :]
-                    embed_generated_h.append(hidden_states)
-        embed_generated_h = np.asarray(np.stack(embed_generated_h), dtype=np.float32)
-        np.save(f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/' + info + f'{args.model_name}_gene_embeddings_h_layer_wise.npy', embed_generated_h)
+                with TraceDict(model, HEADS + MLPS) as ret:
+                    output = model(prompt, output_hidden_states=True)
+                head_wise_hidden_states = [ret[head].output.squeeze().detach().cpu() for head in HEADS]
+                head_wise_hidden_states = torch.stack(head_wise_hidden_states, dim=0).squeeze().numpy()
+                mlp_wise_hidden_states = [ret[mlp].output.squeeze().detach().cpu() for mlp in MLPS]
+                mlp_wise_hidden_states = torch.stack(mlp_wise_hidden_states, dim=0).squeeze().numpy()
 
-        HEADS = [f"model.layers.{i}.self_attn.head_out" for i in range(model.config.num_hidden_layers)]
-        MLPS = [f"model.layers.{i}.mlp" for i in range(model.config.num_hidden_layers)]
+                embed_generated_h_loc2.append(mlp_wise_hidden_states[:, -1, :])
+                embed_generated_h_loc1.append(head_wise_hidden_states[:, -1, :])
+        embed_generated_h_loc2 = np.asarray(np.stack(embed_generated_t_loc2), dtype=np.float32)
+        embed_generated_h_loc1 = np.asarray(np.stack(embed_generated_t_loc1), dtype=np.float32)
+        np.save(f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/' + info + f'{args.model_name}_gene_embeddings_h_head_wise.npy', embed_generated_h_loc2)
+        np.save(f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/' + info + f'{args.model_name}_gene_embeddings_h_mlp_wise.npy', embed_generated_h_loc1)
+
+        
         embed_generated_loc2 = []
         embed_generated_loc1 = []
         for i in tqdm(range(length)):
@@ -432,17 +451,28 @@ def main():
 
 
         if args.most_likely:
-            if feat_loc == 3:
-                embed_generated = np.load(f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/' + info + f'{args.model_name}_gene_embeddings_layer_wise.npy',
+            if feat_loc == 1:
+                embed_generated = np.load(f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/' + info + f'{args.model_name}_gene_embeddings_head_wise.npy',
+                                  allow_pickle=True)
+                embed_generated_h = np.load(f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/' + info + f'{args.model_name}_gene_embeddings_h_head_wise.npy',
+                                  allow_pickle=True)
+                embed_generated_t = np.load(f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/' + info + f'{args.model_name}_gene_embeddings_t_head_wise.npy',
                                   allow_pickle=True)
             elif feat_loc == 2:
                 embed_generated = np.load(
                     f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/' + info + f'{args.model_name}_gene_embeddings_mlp_wise.npy',
                     allow_pickle=True)
+                embed_generated_h = np.load(f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/' + info + f'{args.model_name}_gene_embeddings_h_mlp_wise.npy',
+                                  allow_pickle=True)
+                embed_generated_t = np.load(f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/' + info + f'{args.model_name}_gene_embeddings_t_mlp_wise.npy',
+                                  allow_pickle=True)
             else:
-                embed_generated = np.load(
-                    f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/' + info + f'{args.model_name}_gene_embeddings_head_wise.npy',
-                    allow_pickle=True)
+                assert "Not supported!"
+                # embed_generated = np.load(f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/' + info + f'{args.model_name}_gene_embeddings_layer_wise.npy',
+                                #   allow_pickle=True)
+                # embed_generated = np.load(
+                #     f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/' + info + f'{args.model_name}_gene_embeddings_head_wise.npy',
+                #     allow_pickle=True)
             feat_indices_wild = []
             feat_indices_eval = []
 
