@@ -58,7 +58,7 @@ def main():
     parser.add_argument('--num_gene', type=int, default=1)
     parser.add_argument('--use_rouge', type=bool, default= False)
     parser.add_argument('--weighted_svd', type=int, default=0)
-    parser.add_argument('--feat_loc_svd', type=int, default=0)
+    parser.add_argument('--feat_loc_svd', type=int, default=1)
     parser.add_argument('--wild_ratio', type=float, default=0.75)
     parser.add_argument('--thres_gt', type=float, default=0.5)
     parser.add_argument('--most_likely', type=bool, default=True)
@@ -171,10 +171,7 @@ def main():
     embed_generated = []
     embed_generated_h =[]
     embed_generated_t=[]
-    embed_generated_t_loc2 = []
-    embed_generated_t_loc1 = []
-    embed_generated_h_loc2 = []
-    embed_generated_h_loc1 = []
+    
 
     if args.dataset_name == 'tydiqa':
             length = len(used_indices)
@@ -191,10 +188,6 @@ def main():
             info = 'batch_generations_'
         answers = np.load(
             f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/answers/' + info + f'hal_det_{args.model_name}_{args.dataset_name}_answers_index_{i}.npy')
-        truths= np.load(
-            f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/truths/' + info + f'hal_det_{args.model_name}_{args.dataset_name}_truths_index_{i}.npy')
-        hallucinations= np.load(
-            f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/hallucinations/' + info + f'hal_det_{args.model_name}_{args.dataset_name}_hallucinations_index_{i}.npy')
         for anw in answers:
 
             if args.dataset_name == 'tydiqa':
@@ -213,22 +206,87 @@ def main():
                     hidden_states = torch.stack(hidden_states, dim=0).squeeze()
                     hidden_states = hidden_states.detach().cpu().numpy()[:, -1, :]
                     embed_generated.append(hidden_states)
-        embed_generated = np.asarray(np.stack(embed_generated), dtype=np.float32)
-        np.save(f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/' + info + f'{args.model_name}_gene_embeddings_layer_wise.npy', embed_generated)
+    embed_generated = np.asarray(np.stack(embed_generated), dtype=np.float32)
+    np.save(f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/' + info + f'{args.model_name}_gene_embeddings_layer_wise.npy', embed_generated)
 
-        for tru in truths:
+    embed_generated_t_loc2 = []
+    embed_generated_t_loc1 = []
+    embed_generated_h_loc2 = []
+    embed_generated_h_loc1 = []
+    embed_generated_loc2 = []
+    embed_generated_loc1 = []
+    for i in tqdm(range(length)):
+        if args.dataset_name == 'tydiqa':
+            question = dataset[int(used_indices[i])]['question']
+        else:
+            question = dataset[i]['question']
 
+
+        answers = np.load(
+                f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/answers/' + info + f'hal_det_{args.model_name}_{args.dataset_name}_answers_index_{i}.npy')
+        truths= np.load(
+                f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/truths/' + info + f'hal_det_{args.model_name}_{args.dataset_name}_truths_index_{i}.npy')
+        hallucinations= np.load(
+                f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/hallucinations/' + info + f'hal_det_{args.model_name}_{args.dataset_name}_hallucinations_index_{i}.npy')
+        for anw in answers:
             if args.dataset_name == 'tydiqa':
-                    prompt = tokenizer(
+                prompt = tokenizer(
+                        "Concisely answer the following question based on the information in the given passage: \n" + \
+                        " Passage: " + dataset[int(used_indices[i])]['context'] + " \n Q: " + question + " \n A:" + anw,
+                        return_tensors='pt').input_ids.cuda()
+            elif args.dataset_name == 'coqa':
+                prompt = tokenizer(dataset[i]['prompt'] + anw, return_tensors='pt').input_ids.cuda()
+            else:
+                prompt = tokenizer(
+                        f"Answer the question concisely. Q: {question}" + " A:" + anw,
+                        return_tensors='pt').input_ids.cuda()
+
+            with torch.no_grad():
+                with TraceDict(model, HEADS + MLPS) as ret:
+                    output = model(prompt, output_hidden_states=True)
+                head_wise_hidden_states = [ret[head].output.squeeze().detach().cpu() for head in HEADS]
+                head_wise_hidden_states = torch.stack(head_wise_hidden_states, dim=0).squeeze().numpy()
+                mlp_wise_hidden_states = [ret[mlp].output.squeeze().detach().cpu() for mlp in MLPS]
+                mlp_wise_hidden_states = torch.stack(mlp_wise_hidden_states, dim=0).squeeze().numpy()
+
+                embed_generated_loc2.append(mlp_wise_hidden_states[:, -1, :])
+                embed_generated_loc1.append(head_wise_hidden_states[:, -1, :])
+        for hal in hallucinations:
+            if args.dataset_name == 'tydiqa':
+                prompt = tokenizer(
+                        "Concisely answer the following question based on the information in the given passage: \n" + \
+                        " Passage: " + dataset[int(used_indices[i])]['context'] + " \n Q: " + question + " \n A:" + hal,
+                        return_tensors='pt').input_ids.cuda()
+            elif args.dataset_name == 'coqa':
+                prompt = tokenizer(dataset[i]['prompt'] + hal, return_tensors='pt').input_ids.cuda()
+            else:
+                prompt = tokenizer(
+                        f"Answer the question concisely. Q: {question}" + " A:" + hal,
+                        return_tensors='pt').input_ids.cuda()
+
+            with torch.no_grad():
+                with TraceDict(model, HEADS + MLPS) as ret:
+                        output = model(prompt, output_hidden_states=True)
+                head_wise_hidden_states = [ret[head].output.squeeze().detach().cpu() for head in HEADS]
+                head_wise_hidden_states = torch.stack(head_wise_hidden_states, dim=0).squeeze().numpy()
+                mlp_wise_hidden_states = [ret[mlp].output.squeeze().detach().cpu() for mlp in MLPS]
+                mlp_wise_hidden_states = torch.stack(mlp_wise_hidden_states, dim=0).squeeze().numpy()
+
+                embed_generated_h_loc2.append(mlp_wise_hidden_states[:, -1, :])
+                embed_generated_h_loc1.append(head_wise_hidden_states[:, -1, :])
+        for tru in truths:
+            if args.dataset_name == 'tydiqa':
+                prompt = tokenizer(
                         "Concisely answer the following question based on the information in the given passage: \n" + \
                         " Passage: " + dataset[int(used_indices[i])]['context'] + " \n Q: " + question + " \n A:" + tru,
                         return_tensors='pt').input_ids.cuda()
             elif args.dataset_name == 'coqa':
-                    prompt = tokenizer(dataset[i]['prompt'] + tru, return_tensors='pt').input_ids.cuda()
+                prompt = tokenizer(dataset[i]['prompt'] + tru, return_tensors='pt').input_ids.cuda()
             else:
-                    prompt = tokenizer(
+                prompt = tokenizer(
                         f"Answer the question concisely. Q: {question}" + " A:" + tru,
                         return_tensors='pt').input_ids.cuda()
+
             with torch.no_grad():
                 with TraceDict(model, HEADS + MLPS) as ret:
                     output = model(prompt, output_hidden_states=True)
@@ -239,123 +297,62 @@ def main():
 
                 embed_generated_t_loc2.append(mlp_wise_hidden_states[:, -1, :])
                 embed_generated_t_loc1.append(head_wise_hidden_states[:, -1, :])
-        embed_generated_t_loc2 = np.asarray(np.stack(embed_generated_t_loc2), dtype=np.float32)
-        embed_generated_t_loc1 = np.asarray(np.stack(embed_generated_t_loc1), dtype=np.float32)
-        np.save(f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/' + info + f'{args.model_name}_gene_embeddings_t_head_wise.npy', embed_generated_t_loc2)
-        np.save(f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/' + info + f'{args.model_name}_gene_embeddings_t_mlp_wise.npy', embed_generated_t_loc1)
+            
+    embed_generated_loc2 = np.asarray(np.stack(embed_generated_loc2), dtype=np.float32)
+    embed_generated_loc1 = np.asarray(np.stack(embed_generated_loc1), dtype=np.float32)
+    embed_generated_h_loc2 = np.asarray(np.stack(embed_generated_h_loc2), dtype=np.float32)
+    embed_generated_h_loc1 = np.asarray(np.stack(embed_generated_h_loc1), dtype=np.float32)
+    embed_generated_t_loc2 = np.asarray(np.stack(embed_generated_t_loc2), dtype=np.float32)
+    embed_generated_t_loc1 = np.asarray(np.stack(embed_generated_t_loc1), dtype=np.float32)
 
-        for hal in hallucinations:
-
-            if args.dataset_name == 'tydiqa':
-                    prompt = tokenizer(
-                        "Concisely answer the following question based on the information in the given passage: \n" + \
-                        " Passage: " + dataset[int(used_indices[i])]['context'] + " \n Q: " + question + " \n A:" + hal,
-                        return_tensors='pt').input_ids.cuda()
-            elif args.dataset_name == 'coqa':
-                    prompt = tokenizer(dataset[i]['prompt'] + hal, return_tensors='pt').input_ids.cuda()
-            else:
-                    prompt = tokenizer(
-                        f"Answer the question concisely. Q: {question}" + " A:" + hal,
-                        return_tensors='pt').input_ids.cuda()
-            with torch.no_grad():
-                with TraceDict(model, HEADS + MLPS) as ret:
-                    output = model(prompt, output_hidden_states=True)
-                head_wise_hidden_states = [ret[head].output.squeeze().detach().cpu() for head in HEADS]
-                head_wise_hidden_states = torch.stack(head_wise_hidden_states, dim=0).squeeze().numpy()
-                mlp_wise_hidden_states = [ret[mlp].output.squeeze().detach().cpu() for mlp in MLPS]
-                mlp_wise_hidden_states = torch.stack(mlp_wise_hidden_states, dim=0).squeeze().numpy()
-
-                embed_generated_h_loc2.append(mlp_wise_hidden_states[:, -1, :])
-                embed_generated_h_loc1.append(head_wise_hidden_states[:, -1, :])
-        embed_generated_h_loc2 = np.asarray(np.stack(embed_generated_t_loc2), dtype=np.float32)
-        embed_generated_h_loc1 = np.asarray(np.stack(embed_generated_t_loc1), dtype=np.float32)
-        np.save(f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/' + info + f'{args.model_name}_gene_embeddings_h_head_wise.npy', embed_generated_h_loc2)
-        np.save(f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/' + info + f'{args.model_name}_gene_embeddings_h_mlp_wise.npy', embed_generated_h_loc1)
-
-        
-        embed_generated_loc2 = []
-        embed_generated_loc1 = []
-        for i in tqdm(range(length)):
-            if args.dataset_name == 'tydiqa':
-                question = dataset[int(used_indices[i])]['question']
-            else:
-                question = dataset[i]['question']
-
-
-            answers = np.load(
-                f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/answers/' + info + f'hal_det_{args.model_name}_{args.dataset_name}_answers_index_{i}.npy')
-            for anw in answers:
-                if args.dataset_name == 'tydiqa':
-                    prompt = tokenizer(
-                        "Concisely answer the following question based on the information in the given passage: \n" + \
-                        " Passage: " + dataset[int(used_indices[i])]['context'] + " \n Q: " + question + " \n A:",
-                        return_tensors='pt').input_ids.cuda()
-                elif args.dataset_name == 'coqa':
-                    prompt = tokenizer(dataset[i]['prompt'] + anw, return_tensors='pt').input_ids.cuda()
-                else:
-                    prompt = tokenizer(
-                        f"Answer the question concisely. Q: {question}" + " A:" + anw,
-                        return_tensors='pt').input_ids.cuda()
-
-                with torch.no_grad():
-                    with TraceDict(model, HEADS + MLPS) as ret:
-                        output = model(prompt, output_hidden_states=True)
-                    head_wise_hidden_states = [ret[head].output.squeeze().detach().cpu() for head in HEADS]
-                    head_wise_hidden_states = torch.stack(head_wise_hidden_states, dim=0).squeeze().numpy()
-                    mlp_wise_hidden_states = [ret[mlp].output.squeeze().detach().cpu() for mlp in MLPS]
-                    mlp_wise_hidden_states = torch.stack(mlp_wise_hidden_states, dim=0).squeeze().numpy()
-
-                    embed_generated_loc2.append(mlp_wise_hidden_states[:, -1, :])
-                    embed_generated_loc1.append(head_wise_hidden_states[:, -1, :])
-        embed_generated_loc2 = np.asarray(np.stack(embed_generated_loc2), dtype=np.float32)
-        embed_generated_loc1 = np.asarray(np.stack(embed_generated_loc1), dtype=np.float32)
-
-        np.save(f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/' + info + f'{args.model_name}_gene_embeddings_head_wise.npy', embed_generated_loc1)
-        np.save(f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/' + info + f'{args.model_name}_embeddings_mlp_wise.npy',  embed_generated_loc2)
-
-
+    np.save(f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/' + info + f'{args.model_name}_gene_embeddings_head_wise.npy', embed_generated_loc1)
+    np.save(f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/' + info + f'{args.model_name}_embeddings_mlp_wise.npy',  embed_generated_loc2)
+    np.save(f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/' + info + f'{args.model_name}_gene_embeddings_h_head_wise.npy', embed_generated_h_loc2)
+    np.save(f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/' + info + f'{args.model_name}_gene_embeddings_h_mlp_wise.npy', embed_generated_h_loc1)
+    np.save(f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/' + info + f'{args.model_name}_gene_embeddings_t_head_wise.npy', embed_generated_t_loc2)
+    np.save(f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/' + info + f'{args.model_name}_gene_embeddings_t_mlp_wise.npy', embed_generated_t_loc1)
 
         # get the split and label (true or false) of the unlabeled data and the test data.
-        if args.use_rouge:
-            gts = np.load(f'./ml_{args.dataset_name}_{args.model_name}_rouge_score.npy')
-            gts_bg = np.load(f'./bg_{args.dataset_name}_{args.model_name}_rouge_score.npy')
-        else:
-            gts = np.load(f'./ml_{args.dataset_name}_{args.model_name}_bleurt_score.npy')
-            gts_bg = np.load(f'./bg_{args.dataset_name}_{args.model_name}_bleurt_score.npy')
+    if args.use_rouge:
+        gts = np.load(f'./ml_{args.dataset_name}_{args.model_name}_rouge_score.npy')
+        gts_bg = np.load(f'./bg_{args.dataset_name}_{args.model_name}_rouge_score.npy')
+    else:
+        gts = np.load(f'./ml_{args.dataset_name}_{args.model_name}_bleurt_score.npy')
+        gts_bg = np.load(f'./bg_{args.dataset_name}_{args.model_name}_bleurt_score.npy')
         thres = args.thres_gt
         gt_label = np.asarray(gts> thres, dtype=np.int32)
         gt_label_bg = np.asarray(gts_bg > thres, dtype=np.int32)
 
 
-        if args.dataset_name == 'tydiqa':
-            length = len(used_indices)
-        else:
-            length = len(dataset)
+    if args.dataset_name == 'tydiqa':
+        length = len(used_indices)
+    else:
+        length = len(dataset)
 
 
-        permuted_index = np.random.permutation(length)
-        wild_q_indices = permuted_index[:int(args.wild_ratio * length)]
+    permuted_index = np.random.permutation(length)
+    wild_q_indices = permuted_index[:int(args.wild_ratio * length)]
         # exclude validation samples.
-        wild_q_indices1 = wild_q_indices[:len(wild_q_indices) - 100]
-        wild_q_indices2 = wild_q_indices[len(wild_q_indices) - 100:]
-        gt_label_test = []
-        gt_label_wild = []
-        gt_label_val = []
-        for i in range(length):
-            if i not in wild_q_indices:
-                gt_label_test.extend(gt_label[i: i+1])
-            elif i in wild_q_indices1:
-                gt_label_wild.extend(gt_label[i: i+1])
-            else:
-                gt_label_val.extend(gt_label[i: i+1])
-        gt_label_test = np.asarray(gt_label_test)
-        gt_label_wild = np.asarray(gt_label_wild)
-        gt_label_val = np.asarray(gt_label_val)
+    wild_q_indices1 = wild_q_indices[:len(wild_q_indices) - 100]
+    wild_q_indices2 = wild_q_indices[len(wild_q_indices) - 100:]
+    gt_label_test = []
+    gt_label_wild = []
+    gt_label_val = []
+    for i in range(length):
+        if i not in wild_q_indices:
+            gt_label_test.extend(gt_label[i: i+1])
+        elif i in wild_q_indices1:
+            gt_label_wild.extend(gt_label[i: i+1])
+        else:
+            gt_label_val.extend(gt_label[i: i+1])
+    gt_label_test = np.asarray(gt_label_test)
+    gt_label_wild = np.asarray(gt_label_wild)
+    gt_label_val = np.asarray(gt_label_val)
 
 
 
 
-        def svd_embed_score(embed_generated_wild,  gt_label,embed_generated_h,embed_generated_t, begin_k, k_span, mean=1, svd=1, weight=0):
+    def svd_embed_score(embed_generated_wild,  gt_label,embed_generated_h,embed_generated_t, begin_k, k_span, mean=1, svd=10, epsilon=1e-20):
             embed_generated = embed_generated_wild
             # embed_hallucination= embed_generated_h
             best_auroc_over_k = 0
@@ -369,37 +366,68 @@ def main():
                 mean_recorded = None
                 # best_projection = None
                 for layer in range(len(embed_generated_wild[0])):
+                    # print(len(embed_generated_wild[0]))
                     if mean:
                         mean_recorded = embed_generated[:, layer, :].mean(0)
                         centered = embed_generated[:, layer, :] - mean_recorded
+                        mean_h=embed_generated_h[:, layer, :].mean(0)
+                        centered_h=embed_generated_h[:, layer, :]-mean_h
+                        mean_t=embed_generated_t[:, layer, :].mean(0)
+                        centered_t=embed_generated_t[:, layer, :]-mean_t
                     else:
                         centered = embed_generated[:, layer, :]
 
-                    mean_h=embed_generated_h[:, layer, :].mean(0)
-                    centered_h=embed_generated_h[:, layer, :]-mean_h
+                    
+                    
 
-                    mean_t=embed_generated_t[:, layer, :].mean(0)
-                    centered_t=embed_generated_t[:, layer, :].mean(0)-mean_t
+                    
+                    
 
                     # if not svd:
                     #     assert "Not implemented!"
                     # else:
-                    _, sin_value, V_p = torch.linalg.svd(torch.from_numpy(centered).cuda())
-                    C=(1 / centered.shape[0])* V_p.T.cpu().data.numpy() @ np.diag(sin_value.cpu().data.numpy() ** 2)
-                    _, sin_value_h, V_p_h = torch.linalg.svd(torch.from_numpy(centered_h).cuda())
-                    C_h=(1 / centered_h.shape[0])* V_p_h.T.cpu().data.numpy() @ np.diag(sin_value_h.cpu().data.numpy() ** 2)
-                    _, sin_value_t, V_p_t = torch.linalg.svd(torch.from_numpy(centered_t).cuda())
-                    C_t=(1 / centered_t.shape[0])* V_p_t.T.cpu().data.numpy() @ np.diag(sin_value_t.cpu().data.numpy() ** 2)
-                    scores= (centered*np.invert(C)*centered.T) ** 0.5 - ((embed_generated[:, layer, :]-mean_t)*np.invert(C_t)*(embed_generated[:, layer, :]-mean_t).T) ** 0.5
-                    + ((embed_generated[:, layer, :]-mean_h)*np.invert(C_h)*(embed_generated[:, layer, :]-mean_h).T) ** 0.5
-                   
-                    # clf = Perceptron(tol=1e-3, random_state=0)
+                    centered=torch.from_numpy(centered).cuda()
+                    centered_h=torch.from_numpy(centered_h).cuda()
+                    centered_t=torch.from_numpy(centered_t).cuda()
+                    _, sin_value, V_p = torch.linalg.svd(centered, full_matrices=False)
+                    sin_value_squared = torch.diag(sin_value[:svd]) ** 2
+                    V_p = V_p[:svd, :]
+                    C=(1 / centered.shape[0])* V_p.T @ sin_value_squared @ V_p
+
+
+                    _, sin_value_h, V_p_h = torch.linalg.svd(centered_h, full_matrices=False)
+                    sin_value_h_squared = torch.diag(sin_value_h[:svd]) ** 2
+                    V_p_h = V_p_h[:svd, :]
+                    C_h=(1 / centered_h.shape[0])* V_p_h.T @ sin_value_h_squared @ V_p_h
+
+                    # print(centered_t.shape)
+                    _, sin_value_t, V_p_t = torch.linalg.svd(centered_t, full_matrices=False)
+                    sin_value_t_squared = torch.diag(sin_value_t[:svd]) ** 2
+                    V_p_t = V_p_t[:svd, :]
+                    C_t=(1 / centered_t.shape[0])* V_p_t.T @ sin_value_t_squared @ V_p_t
+                    inv_C= torch.linalg.inv(C) + torch.eye(C.shape[0], dtype=int).cuda() * epsilon
+                    inv_C_t= torch.linalg.inv(C_t) + torch.eye(C_t.shape[0], dtype=int).cuda() * epsilon
+                    inv_C_h= torch.linalg.inv(C_h) + torch.eye(C_h.shape[0], dtype=int).cuda() * epsilon
+                    scores= torch.sqrt(centered @ inv_C @ centered.T)  - torch.sqrt(torch.from_numpy(embed_generated[:, layer, :]-mean_t).cuda() @ inv_C_t @ torch.from_numpy(embed_generated[:, layer, :]-mean_t).cuda().T)
+                    + torch.sqrt(torch.from_numpy(embed_generated[:, layer, :]-mean_h).cuda() @ inv_C_h @ torch.from_numpy(embed_generated[:, layer, :]-mean_h).cuda().T) 
+                    print(torch.isnan(scores).any())
+                    scores = torch.mean(scores, -1, keepdim=True)
+                    scores = torch.sqrt(torch.sum(torch.square(scores), dim=1))
+
+                    projection=V_p[:k, :].T
+                    scores1 = torch.mean(centered @ projection, -1, keepdim=True)
+                    scores1 = torch.sqrt(torch.sum(torch.square(scores1), dim=1))
                     
+                    print(torch.isnan(torch.sqrt(centered @ inv_C @ centered.T)).any())
+                    print(torch.isnan(((torch.from_numpy(embed_generated[:, layer, :]-mean_t).cuda() @ torch.linalg.pinv(C_t) @ torch.from_numpy(embed_generated[:, layer, :]-mean_t).cuda().T)** 0.5).any()))
+                    print(torch.isnan(((torch.from_numpy(embed_generated[:, layer, :]-mean_h).cuda() @ torch.linalg.pinv(C_h) @ torch.from_numpy(embed_generated[:, layer, :]-mean_h).cuda().T)** 0.5).any()))
 
 
                     # not sure about whether true and false data the direction will point to,
                     # so we test both. similar practices are in the representation engineering paper
                     # https://arxiv.org/abs/2310.01405
+                    scores=scores.data.cpu().numpy()
+                    # scores1=scores1.data.cpu().numpy()
                     measures1 = get_measures(scores[gt_label == 1],
                                              scores[gt_label == 0], plot=False)
                     measures2 = get_measures(-scores[gt_label == 1],
@@ -416,8 +444,7 @@ def main():
                         best_auroc = measures[0]
                         best_result = [100 * measures[2], 100 * measures[0]]
                         best_layer = layer
-                        # best_scores = sign_layer * scores
-                        # best_projection = projection
+
                         best_mean = mean_recorded
                         best_sign = sign_layer
                 print('k: ', k, 'best result: ', best_result, 'layer: ', best_layer,
@@ -445,56 +472,59 @@ def main():
                     }
 
 
-        from sklearn.decomposition import PCA
-        feat_loc = args.feat_loc_svd
+    from sklearn.decomposition import PCA
+    feat_loc = args.feat_loc_svd
 
 
 
-        if args.most_likely:
-            if feat_loc == 1:
-                embed_generated = np.load(f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/' + info + f'{args.model_name}_gene_embeddings_head_wise.npy',
+    if args.most_likely:
+        if feat_loc == 1:
+            embed_generated = np.load(f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/' + info + f'{args.model_name}_gene_embeddings_head_wise.npy',
                                   allow_pickle=True)
-                embed_generated_h = np.load(f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/' + info + f'{args.model_name}_gene_embeddings_h_head_wise.npy',
+            embed_generated_h = np.load(f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/' + info + f'{args.model_name}_gene_embeddings_h_head_wise.npy',
                                   allow_pickle=True)
-                embed_generated_t = np.load(f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/' + info + f'{args.model_name}_gene_embeddings_t_head_wise.npy',
+            embed_generated_t = np.load(f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/' + info + f'{args.model_name}_gene_embeddings_t_head_wise.npy',
                                   allow_pickle=True)
-            elif feat_loc == 2:
-                embed_generated = np.load(
+        elif feat_loc == 2:
+            embed_generated = np.load(
                     f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/' + info + f'{args.model_name}_gene_embeddings_mlp_wise.npy',
                     allow_pickle=True)
-                embed_generated_h = np.load(f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/' + info + f'{args.model_name}_gene_embeddings_h_mlp_wise.npy',
+            embed_generated_h = np.load(f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/' + info + f'{args.model_name}_gene_embeddings_h_mlp_wise.npy',
                                   allow_pickle=True)
-                embed_generated_t = np.load(f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/' + info + f'{args.model_name}_gene_embeddings_t_mlp_wise.npy',
+            embed_generated_t = np.load(f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/' + info + f'{args.model_name}_gene_embeddings_t_mlp_wise.npy',
                                   allow_pickle=True)
-            else:
-                assert "Not supported!"
+        else:
+            assert "Not supported!"
                 # embed_generated = np.load(f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/' + info + f'{args.model_name}_gene_embeddings_layer_wise.npy',
                                 #   allow_pickle=True)
                 # embed_generated = np.load(
                 #     f'save_for_eval/{args.dataset_name}/{args.model_name}_hal_det/' + info + f'{args.model_name}_gene_embeddings_head_wise.npy',
                 #     allow_pickle=True)
-            feat_indices_wild = []
-            feat_indices_eval = []
+        feat_indices_wild = []
+        feat_indices_eval = []
 
-            if args.dataset_name == 'tydiqa':
-                length = len(used_indices)
-            else:
-                length = len(dataset)
+        if args.dataset_name == 'tydiqa':
+            length = len(used_indices)
+        else:
+            length = len(dataset)
 
 
-            for i in range(length):
-                if i in wild_q_indices1:
-                    feat_indices_wild.extend(np.arange(i, i+1).tolist())
-                elif i in wild_q_indices2:
-                    feat_indices_eval.extend(np.arange(i, i + 1).tolist())
-            if feat_loc == 3:
-                embed_generated_wild = embed_generated[feat_indices_wild][:,1:,:]
-                embed_generated_eval = embed_generated[feat_indices_eval][:, 1:, :]
-                embed_generated_hal,embed_generated_tru=embed_generated_h[feat_indices_wild][:,1:,:], embed_generated_t[feat_indices_wild][:,1:,:]
-            else:
-                embed_generated_wild = embed_generated[feat_indices_wild]
-                embed_generated_eval = embed_generated[feat_indices_eval]
-                embed_generated_hal,embed_generated_tru=embed_generated_h[feat_indices_wild], embed_generated_t[feat_indices_wild]
+        for i in range(length):
+            if i in wild_q_indices1:
+                feat_indices_wild.extend(np.arange(i, i+1).tolist())
+            elif i in wild_q_indices2:
+                feat_indices_eval.extend(np.arange(i, i + 1).tolist())
+        if feat_loc == 3:
+            embed_generated_wild = embed_generated[feat_indices_wild][:,1:,:]
+            embed_generated_eval = embed_generated[feat_indices_eval][:, 1:, :]
+            embed_generated_hal,embed_generated_tru=embed_generated_h[feat_indices_wild][:,1:,:], embed_generated_t[feat_indices_wild][:,1:,:]
+        else:
+            embed_generated_wild = embed_generated[feat_indices_wild]
+            embed_generated_eval = embed_generated[feat_indices_eval]
+                # print(embed_generated.shape)
+                # print(embed_generated_h.shape)
+                # print(embed_generated_t.shape)
+            embed_generated_hal,embed_generated_tru=embed_generated_h[feat_indices_eval], embed_generated_t[feat_indices_eval]
 
 
 
@@ -504,7 +534,7 @@ def main():
         #                                    1, 11, mean=0, svd=0, weight=args.weighted_svd)
         # get the best hyper-parameters on validation set
         returned_results = svd_embed_score(embed_generated_eval, gt_label_val, embed_generated_hal,embed_generated_tru,
-                                           1, 11, mean=1, svd=1, wei1ght=args.weighted_svd)
+                                           1, 11, mean=1, svd=10)
 
         pca_model = PCA(n_components=returned_results['k'], whiten=False).fit(embed_generated_wild[:,returned_results['best_layer'],:])
         projection = pca_model.components_.T
