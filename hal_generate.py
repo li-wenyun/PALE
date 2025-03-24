@@ -62,7 +62,7 @@ def main():
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--model_name', type=str, default='step-1-8k')
-    parser.add_argument('--dataset_name', type=str, default='tqa')
+    parser.add_argument('--dataset_name', type=str, default='triviaqa')
     parser.add_argument('--num_gene', type=int, default=1)
     parser.add_argument('--use_api', type=bool, default=True)
     parser.add_argument('--most_likely', type=bool, default=True)
@@ -175,6 +175,7 @@ def main():
         raise ValueError("Invalid dataset name")
     f = open(args.instruction, 'r', encoding="utf-8")
     instruction = f.read()
+    error_output='No output'
 
     if args.use_api:
         begin_index = 0
@@ -210,8 +211,9 @@ def main():
                 hallucination_prompt=get_hal_prompt(dataset[int(used_indices[i])]['context'],question,instruction)
                 truth_prompt=get_truth_prompt(dataset[int(used_indices[i])]['context'],question)
             elif args.dataset_name == 'triviaqa':
-                prompt = get_qa_prompt("None",dataset[i]['prompt'])
-                hallucination_prompt=get_hal_prompt("None",dataset[i]['prompt'],instruction)
+                prompt = get_qa_prompt("None",dataset[i]['question'])
+                question= dataset[i]['question']
+                hallucination_prompt=get_hal_prompt("None",dataset[i]['question'],instruction)
                 truth_prompt=get_truth_prompt("None",question)
             elif args.dataset_name == 'coqa':
                 prompt = get_qa_prompt("None",dataset[i]['prompt'])
@@ -223,31 +225,46 @@ def main():
 
             for gen_iter in range(args.num_gene):
                 if args.most_likely:
-                    response = client.chat.completions.create(
+                    try:
+                        response = client.chat.completions.create(
                     model = args.model_name,
                     messages = prompt,
                     max_tokens=256,
                     top_p=1,
                     temperature = 1,
                     )
-                    hallucination_response = client.chat.completions.create(
+                        decoded=response.choices[0].message.content
+                    except openai.APIStatusError as e:
+                        print("error occured!"+str(gen_iter)+"responce {e}")
+                        decoded = error_output
+                    try:
+                        hallucination_response = client.chat.completions.create(
                     model = args.model_name,
                     messages = hallucination_prompt,
                     max_tokens=256,
                     top_p=1,
                     temperature = 1,
                     )
+                        hallucination_decoded=hallucination_response.choices[0].message.content
+                    except openai.APIStatusError as e:
+                        print("error occured!"+str(gen_iter)+"hallucination_responce {e}")
+                        hallucination_decoded = error_output
                     if args.dataset_name == 'tydiqa' or args.dataset_name == 'tydiqa':
-                        truth_response=client.chat.completions.create(
+                        try:
+                            truth_response=client.chat.completions.create(
                         model = args.model_name,
                         messages = truth_prompt,
                     max_tokens=256,
                         top_p=1,
                         temperature=1 
                     )
-                        truth_decoded=truth_response.choices[0].message.content
-                    decoded=response.choices[0].message.content
-                    hallucination_decoded=hallucination_response.choices[0].message.content
+                            truth_decoded=truth_response.choices[0].message.content
+                        except openai.APIStatusError as e:
+                            print("error occured!"+str(gen_iter)+"truth_responce {e}")
+                            truth_decoded =error_output
+                    
+                    
+                    
                 else:
                     response = client.chat.completions.create(
                     model = args.model_name,
@@ -275,10 +292,10 @@ def main():
                         top_p=0.5,
                     temperature = 0.5, 
                     )
-                        truth_decoded=truth_response.choices[0].message.content
+                    truth_decoded=truth_response.choices[0].message.content
                     decoded=response.choices[0].message.content
                     hallucination_decoded=hallucination_response.choices[0].message.content
-                time.sleep(20)
+                time.sleep(40)
 
 
                 # decoded = tokenizer.decode(generated[0, prompt.shape[-1]:],

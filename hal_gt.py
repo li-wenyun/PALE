@@ -50,14 +50,14 @@ def main():
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', type=str, default='llama2_chat_7B')
-    parser.add_argument('--model_name', type=str, default='step-1-8k')
+    parser.add_argument('--model_name', type=str, default='moonshot-v1-8k')
     parser.add_argument('--dataset_name', type=str, default='tqa')
     parser.add_argument('--num_gene', type=int, default=1)
     parser.add_argument('--use_api', type=bool, default=False)
-    parser.add_argument('--most_likely', type=bool, default=True)
+    parser.add_argument('--most_likely', type=bool, default=False)
     parser.add_argument("--model_dir", type=str, default=None, help='local directory with model data')
     parser.add_argument("--instruction", type=str, default=None, help='local directory of instruction file.')
-    parser.add_argument('--use_rouge', type=bool, default=False)
+    parser.add_argument('--use_rouge', type=bool, default=True)
     parser.add_argument('--thres_gt', type=float, default=0.5)
 
     # parser.add_argument('--model_name', type=str, default='llama2_chat_7B')
