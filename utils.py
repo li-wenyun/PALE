@@ -955,3 +955,7 @@ You are an AI assistant. You'll provide helpful, harmless, and detailed response
                                         # "\n#Right Answer#: " + answer +
                                         "\n#Answer#: "}
     ]
+def mahalanobis_distance(x, mean, cov):
+    cov_inv = torch.inverse(cov)
+    delta = x - mean
+    return torch.sqrt(torch.einsum('bi,ij,bj->b', delta, cov_inv, delta))
