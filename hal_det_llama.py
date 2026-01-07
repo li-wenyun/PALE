@@ -1,28 +1,16 @@
 import os
 import torch
 import torch.nn.functional as F
-import evaluate
-from datasets import load_metric
 from datasets import load_dataset
 import datasets
 from tqdm import tqdm
 import numpy as np
-import pickle
-# from utils import get_llama_activations_bau, tokenized_tqa, tokenized_tqa_gen, tokenized_tqa_gen_end_q
 from utils import mahalanobis_distance
 from scipy.io import savemat
 import llama_iti
-import pickle
 import argparse
-import matplotlib.pyplot as plt
-from pprint import pprint
 from baukit import Trace, TraceDict
 from metric_utils import get_measures, print_measures
-import re
-from torch.autograd import Variable
-from scipy.spatial import distance
-from sklearn.linear_model import Perceptron
-from sklearn.ensemble import GradientBoostingRegressor
 
 
 
